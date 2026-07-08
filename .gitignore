@@ -1,0 +1,12 @@
+# Built binaries
+*
+!*.*
+!/**/
+!LICENSE
+
+# artifacts
+/models/
+/scans/
+
+# python compiled stuff
+__pycache__/
