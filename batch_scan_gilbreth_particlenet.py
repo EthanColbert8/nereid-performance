@@ -9,9 +9,13 @@ import tritonclient.grpc as grpcclient
 def main(args):
     batch_sizes = [4, 8, 16, 32, 64, 128, 256, 512, 1024, 2048]
     n_trials = args.ntrials
-    model_name = "particlenet_AK4_PT"
     server_address = f"localhost:{args.port}"
     rand_gen = np.random.default_rng(args.seed)
+
+    model_name = args.model
+    if (model_name != "particlenet_AK4_PT") and (model_name != "particlenet_AK4"):
+        logging.warning(f"Model name \"{model_name}\" not recognized. Using \"particlenet_AK4_PT\" instead.")
+        model_name = "particlenet_AK4_PT"
 
     logging.info(f"Running {n_trials} trials per batch size for model \"{model_name}\"")
 
@@ -92,7 +96,7 @@ if (__name__ == "__main__"):
     parser = argparse.ArgumentParser()
     parser.add_argument("output_dir", type=str, help="Directory in which to save results")
     parser.add_argument("--port", type=int, default=50051, help="Port on which server is listening")
-    # parser.add_argument("--model", type=str, default="big_mlp", help="Name of model to compute inference with")
+    parser.add_argument("--model", type=str, default="particlenet_AK4_PT", help="Name of model to compute inference with")
     parser.add_argument("--ntrials", type=int, default=100, help="Number of trials to run for each batch size")
     parser.add_argument("--seed", type=int, default=None, help="Random seed for input generation")
     parser.add_argument("--verbose", action="store_true", help="Enable debug-level logging")
