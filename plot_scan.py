@@ -111,22 +111,25 @@ def draw_timeseries_plot(timing_info, save_filename, title=None, img_type="png")
 def main(args):
     save_folder = os.path.dirname(args.timings_file)
 
-    with open(args.timings_file, "r") as f:
-        timings = json.load(f)
-    
-    draw_errorbar_plot(
-        timings["batch_size"], timings["throughput"], timings["throughput_err"],
-        "Batch size", "Throughput (infer/sec)",
-        os.path.join(save_folder, "throughput"),
-        title=args.title, xscale="log"
-    )
+    if os.path.isfile(args.timings_file):
+        with open(args.timings_file, "r") as f:
+            timings = json.load(f)
+        
+        draw_errorbar_plot(
+            timings["batch_size"], timings["throughput"], timings["throughput_err"],
+            "Batch size", "Throughput (infer/sec)",
+            os.path.join(save_folder, "throughput"),
+            title=args.title, xscale="log"
+        )
 
-    draw_errorbar_plot(
-        timings["batch_size"], timings["latency"], timings["latency_err"],
-        "Batch size", "Processing tme (ms)",
-        os.path.join(save_folder, "latency"),
-        title=args.title, xscale="log"
-    )
+        draw_errorbar_plot(
+            timings["batch_size"], timings["latency"], timings["latency_err"],
+            "Batch size", "Processing tme (ms)",
+            os.path.join(save_folder, "latency"),
+            title=args.title, xscale="log"
+        )
+    else:
+        logging.warning(f"Timings file \"{args.timings_file}\" does not exist. Skipping throughput/latency plots.")
 
     logging.info("Reading and plotting resource usage data.")
 

@@ -9,6 +9,7 @@
 /scans/
 data/
 *.sif
+*.so
 
 # python compiled stuff
 __pycache__/
