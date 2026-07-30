@@ -5,6 +5,7 @@
 !LICENSE
 
 # artifacts
+build/
 /models/
 /scans/
 data/
