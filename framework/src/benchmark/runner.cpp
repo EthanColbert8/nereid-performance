@@ -25,7 +25,6 @@
 namespace benchmark {
 
     constexpr int STARTUP_TIMEOUT_SECONDS = 120;
-    constexpr int POLL_SLEEP_MICROSECONDS = 250000;
 
     struct ServerProcess {
         pid_t pid;
@@ -297,10 +296,10 @@ namespace benchmark {
                 summary_row["model_name"] = spec.name;
                 summary_row["batch_size"] = batch_size;
                 summary_row["num_trials"] = args.num_trials;
-                summary_row["mean_latency_ms"] = latency_stats.mean;
+                summary_row["mean_latency_ms"] = analysis::RunningStatsMean(latency_stats);
                 summary_row["std_latency_ms"] = analysis::RunningStatsStdDev(latency_stats);
                 summary_row["stderr_latency_ms"] = analysis::RunningStatsStdErr(latency_stats);
-                summary_row["mean_throughput_infer_per_sec"] = throughput_stats.mean;
+                summary_row["mean_throughput_infer_per_sec"] = analysis::RunningStatsMean(throughput_stats);
                 summary_row["std_throughput_infer_per_sec"] = analysis::RunningStatsStdDev(throughput_stats);
                 summary_row["stderr_throughput_infer_per_sec"] = analysis::RunningStatsStdErr(throughput_stats);
                 report_summary.push_back(summary_row);

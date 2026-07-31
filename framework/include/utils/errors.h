@@ -1,5 +1,7 @@
 #pragma once
 
+#include <string>
+
 namespace utils {
 
     void SetError(std::string* error_message, const char* message) {

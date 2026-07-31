@@ -4,6 +4,7 @@
 #include <chrono>
 #include <string>
 #include <sys/types.h>
+#include <sys/wait.h>
 #include <unistd.h>
 
 #include <grpcpp/grpcpp.h>
@@ -11,6 +12,8 @@
 #include "grpc_service.pb.h"
 
 namespace nereid {
+
+    constexpr int POLL_SLEEP_MICROSECONDS = 250000; // 250 milliseconds
 
     size_t DatatypeSizeBytes(const std::string& datatype, std::string* error_message) {
         if (datatype == "FP32" || datatype == "INT32" || datatype == "UINT32") {
