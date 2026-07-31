@@ -12,29 +12,10 @@ endif()
 list(APPEND CMAKE_MODULE_PATH "${CMAKE_CURRENT_SOURCE_DIR}/cmake")
 include(FetchContent)
 
-# --- gRPC / protobuf ---
+# --- fetch dependencies ---
 include(FetchGrpc)
-
-# --- yaml-cpp ---
-set(YAML_CPP_BUILD_TESTS OFF CACHE BOOL "" FORCE)
-set(YAML_CPP_BUILD_TOOLS OFF CACHE BOOL "" FORCE)
-set(YAML_CPP_INSTALL OFF CACHE BOOL "" FORCE)
-FetchContent_Declare(
-  yaml-cpp
-  GIT_REPOSITORY https://github.com/jbeder/yaml-cpp.git
-  GIT_TAG        0.8.0
-  GIT_SHALLOW    TRUE
-)
-FetchContent_MakeAvailable(yaml-cpp)
-
-# --- nlohmann/json ---
-FetchContent_Declare(
-  nlohmann_json
-  GIT_REPOSITORY https://github.com/nlohmann/json.git
-  GIT_TAG        v3.11.3
-  GIT_SHALLOW    TRUE
-)
-FetchContent_MakeAvailable(nlohmann_json)
+include(FetchJson)
+include(FetchYaml)
 
 # --- proto codegen ---
 set(PROTO_PATH "${CMAKE_CURRENT_SOURCE_DIR}/proto")
@@ -68,13 +49,13 @@ target_link_libraries(grpc_service_proto PUBLIC grpc++ protobuf::libprotobuf)
 target_include_directories(grpc_service_proto PUBLIC "${GENERATED_PROTO_DIR}")
 
 # --- nereid-bench executable ---
-set(NEREID_BENCH_SOURCES
-  src/main.cpp
+file(GLOB_RECURSE NEREID_BENCH_SOURCES CONFIGURE_DEPENDS
+  "${CMAKE_CURRENT_SOURCE_DIR}/src/*"
 )
 
 add_executable(nereid-bench ${NEREID_BENCH_SOURCES})
 target_include_directories(nereid-bench PRIVATE
-  "${CMAKE_CURRENT_SOURCE_DIR}/src"
+  "${CMAKE_CURRENT_SOURCE_DIR}/include"
   "${GENERATED_PROTO_DIR}"
 )
 target_link_libraries(nereid-bench PRIVATE
