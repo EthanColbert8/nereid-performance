@@ -157,7 +157,9 @@ namespace benchmark {
         const auto end_time = std::chrono::steady_clock::now();
 
         if (!infer_status.ok()) {
-            utils::SetError(error_message, std::string("inference failed for model: ") + spec.name);
+            char error_buf[400];
+            std::snprintf(error_buf, sizeof(error_buf), "inference failed for model \"%s\". Error code: %d, message: %s", spec.name.c_str(), infer_status.error_code(), infer_status.error_message().c_str());
+            utils::SetError(error_message, error_buf);
             return false;
         }
 
