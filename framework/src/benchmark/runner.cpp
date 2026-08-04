@@ -106,7 +106,8 @@ namespace benchmark {
         int batch_size,
         analysis::RunningStats* latency_stats,
         analysis::RunningStats* throughput_stats,
-        std::string* error_message) {
+        std::string* error_message
+    ) {
         inference::ModelInferRequest request;
         request.set_model_name(spec.name);
         if (!spec.version.empty()) {
@@ -212,7 +213,7 @@ namespace benchmark {
         };
 
         if (!LaunchServer(args.server_binary_path, &server, error_message)) {
-            cleanup();
+            cleanup(); // NOTE (Ethan): `server_started` is guaranteed to be false here?
             return false;
         }
         server_started = true;
