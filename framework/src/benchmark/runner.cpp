@@ -122,6 +122,14 @@ namespace benchmark {
 
             std::vector<int64_t> request_shape;
             BuildRequestShape(input_spec.shape, batch_size, &request_shape);
+
+            // DEBUGGING - print request shape
+            std::fprintf(stderr, "Built request input shape: [%d", request_shape[0]);
+            for (size_t j = 1; j < request_shape.size(); j++) {
+                std::fprintf(stderr, ", %d", request_shape[j]);
+            }
+            std::fprintf(stderr, "]\n");
+
             for (size_t j = 0; j < request_shape.size(); j++) {
                 input->add_shape(request_shape[j]);
             }
