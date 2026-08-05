@@ -105,82 +105,6 @@ namespace benchmark {
         return true;
     }
 
-    bool RunBatchTrial(
-        inference::GRPCInferenceService::Stub* stub,
-        const nereid::ModelSpec& spec,
-        int batch_size,
-        analysis::RunningStats* latency_stats,
-        analysis::RunningStats* throughput_stats,
-        std::string* error_message
-    ) {
-        inference::ModelInferRequest request;
-        request.set_model_name(spec.name);
-        if (!spec.version.empty()) {
-            request.set_model_version(spec.version);
-        }
-
-        for (size_t i = 0; i < spec.inputs.size(); i++) {
-            const nereid::TensorSpec& input_spec = spec.inputs[i];
-            auto* input = request.add_inputs();
-            input->set_name(input_spec.name);
-            input->set_datatype(input_spec.datatype);
-
-            std::vector<int64_t> request_shape;
-            BuildRequestShape(input_spec.shape, batch_size, &request_shape);
-            for (size_t j = 0; j < request_shape.size(); j++) {
-                input->add_shape(request_shape[j]);
-            }
-
-            size_t element_count = 1;
-            for (size_t j = 0; j < request_shape.size(); j++) {
-                if (request_shape[j] <= 0) {
-                    utils::SetError(error_message, std::string("invalid request shape for model: ") + spec.name);
-                    return false;
-                }
-                element_count *= static_cast<size_t>(request_shape[j]);
-            }
-
-            const size_t bytes_per_element = nereid::DatatypeSizeBytes(input_spec.datatype, error_message);
-            if (bytes_per_element == 0) {
-                return false;
-            }
-
-            std::string raw_contents(element_count * bytes_per_element, '\0');
-            request.add_raw_input_contents(raw_contents);
-        }
-
-        for (size_t i = 0; i < spec.outputs.size(); i++) {
-            auto* output = request.add_outputs();
-            output->set_name(spec.outputs[i].name);
-        }
-
-        inference::ModelInferResponse response;
-        grpc::ClientContext infer_context;
-
-        const auto start_time = std::chrono::steady_clock::now();
-        grpc::Status infer_status = stub->ModelInfer(&infer_context, request, &response);
-        const auto end_time = std::chrono::steady_clock::now();
-
-        if (!infer_status.ok()) {
-            char error_buf[400];
-            std::snprintf(error_buf, sizeof(error_buf), "inference failed for model \"%s\". Error code: %d, message: %s", spec.name.c_str(), infer_status.error_code(), infer_status.error_message().c_str());
-            utils::SetError(error_message, error_buf);
-            return false;
-        }
-
-        if (!ValidateInferResponse(spec, response, batch_size, error_message)) {
-            return false;
-        }
-
-        const double latency_ms = std::chrono::duration<double, std::milli>(end_time - start_time).count();
-        const double throughput = static_cast<double>(batch_size) / (latency_ms / 1000.0);
-
-        analysis::RunningStatsPush(*latency_stats, latency_ms);
-        analysis::RunningStatsPush(*throughput_stats, throughput);
-
-        return true;
-    }
-
     bool WriteReport(const cli::Args& args, const nlohmann::json& report, std::string* error_message) {
         FILE* file = std::fopen(args.output_path, "w");
         if (file == nullptr) {
@@ -195,6 +119,118 @@ namespace benchmark {
         if (written != serialized.size()) {
             utils::SetError(error_message, std::string("failed to write output file: ") + args.output_path);
             return false;
+        }
+
+        return true;
+    }
+
+    bool RunBatchTrials(
+        inference::GRPCInferenceService::Stub* stub,
+        const nereid::ModelSpec& spec,
+        int num_trials,
+        int batch_size,
+        analysis::RunningStats* latency_stats,
+        analysis::RunningStats* throughput_stats,
+        std::string* error_message
+    ) {
+        inference::ModelInferRequest request;
+        request.set_model_name(spec.name);
+        if (!spec.version.empty()) {
+            request.set_model_version(spec.version);
+        }
+        
+        std::vector<std::vector<int64_t>> request_shapes;
+        request_shapes.reserve(spec.inputs.size());
+
+        for (size_t i = 0; i < spec.inputs.size(); i++) {
+            const nereid::TensorSpec& input_spec = spec.inputs[i];
+            auto* input = request.add_inputs();
+            input->set_name(input_spec.name);
+            input->set_datatype(input_spec.datatype);
+
+            std::vector<int64_t> request_shape;
+            BuildRequestShape(input_spec.shape, batch_size, &request_shape);
+            for (size_t j = 0; j < request_shape.size(); j++) {
+                input->add_shape(request_shape[j]);
+            }
+            request_shapes.push_back(request_shape);
+
+            // size_t element_count = 1;
+            // for (size_t j = 0; j < request_shape.size(); j++) {
+            //     if (request_shape[j] <= 0) {
+            //         utils::SetError(error_message, std::string("invalid request shape for model: ") + spec.name);
+            //         return false;
+            //     }
+            //     element_count *= static_cast<size_t>(request_shape[j]);
+            // }
+
+            // const size_t bytes_per_element = nereid::DatatypeSizeBytes(input_spec.datatype, error_message);
+            // if (bytes_per_element == 0) {
+            //     return false;
+            // }
+
+            // std::string raw_contents(element_count * bytes_per_element, '\0');
+            // request.add_raw_input_contents(raw_contents);
+        }
+
+        for (size_t i = 0; i < spec.outputs.size(); i++) {
+            auto* output = request.add_outputs();
+            output->set_name(spec.outputs[i].name);
+        }
+
+        inference::ModelInferResponse response;
+        grpc::ClientContext infer_context;
+
+        // the tight loop around running inference trials
+        for (int trial = 0; trial < num_trials; trial++) {
+            request.clear_raw_input_contents();
+
+            std::vector<std::string> raw_input_buffers;
+            raw_input_buffers.reserve(spec.inputs.size());
+
+            for (size_t i = 0; i < spec.inputs.size(); i++) {
+                const nereid::TensorSpec& input_spec = spec.inputs[i];
+                const std::vector<int64_t>& request_shape = request_shapes[i];
+                size_t element_count = 1;
+                for (size_t j = 0; j < request_shape.size(); j++) {
+                    element_count *= static_cast<size_t>(request_shape[j]);
+                }
+                const size_t bytes_per_element = nereid::DatatypeSizeBytes(input_spec.datatype, error_message);
+                if (bytes_per_element == 0) {
+                    return false;
+                }
+
+                // TODO (Ethan): Actually use random numbers, not zeros.
+                std::string raw_contents(element_count * bytes_per_element, '\0');
+                raw_input_buffers.push_back(std::move(raw_contents));
+            }
+
+            const auto start_time = std::chrono::steady_clock::now();
+
+            for (size_t i = 0; i < raw_input_buffers.size(); i++) {
+                request.add_raw_input_contents(raw_input_buffers[i]);
+            }
+
+            grpc::Status infer_status = stub->ModelInfer(&infer_context, request, &response);
+
+            if (!infer_status.ok()) {
+                char error_buf[400];
+                std::snprintf(error_buf, sizeof(error_buf), "inference failed for model \"%s\". Error code: %d, message: %s", spec.name.c_str(), infer_status.error_code(), infer_status.error_message().c_str());
+                utils::SetError(error_message, error_buf);
+                return false;
+            }
+
+            const auto end_time = std::chrono::steady_clock::now();
+
+            if (!ValidateInferResponse(spec, response, batch_size, error_message)) {
+                return false;
+            }
+
+            double latency_ms = std::chrono::duration<double, std::milli>(end_time - start_time).count();
+            double throughput = static_cast<double>(batch_size) / (latency_ms / 1000.0);
+
+            analysis::RunningStatsPush(*latency_stats, latency_ms);
+            analysis::RunningStatsPush(*throughput_stats, throughput);
         }
 
         return true;
@@ -295,12 +331,12 @@ namespace benchmark {
                 analysis::RunningStatsInit(latency_stats);
                 analysis::RunningStatsInit(throughput_stats);
 
-                for (int trial = 0; trial < args.num_trials; trial++) {
-                    if (!RunBatchTrial(stub.get(), spec, batch_size, &latency_stats, &throughput_stats, error_message)) {
-                        cleanup();
-                        return false;
-                    }
+                //for (int trial = 0; trial < args.num_trials; trial++) {
+                if (!RunBatchTrials(stub.get(), spec, args.num_trials, batch_size, &latency_stats, &throughput_stats, error_message)) {
+                    cleanup();
+                    return false;
                 }
+                //}
 
                 nlohmann::json summary_row = nlohmann::json::object();
                 summary_row["model_name"] = spec.name;
