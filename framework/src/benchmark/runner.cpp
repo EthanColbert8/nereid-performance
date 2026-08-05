@@ -71,9 +71,14 @@ namespace benchmark {
     bool BuildRequestShape(const std::vector<int64_t>& metadata_shape, int batch_size, std::vector<int64_t>* shape) {
         shape->clear();
         shape->push_back(batch_size);
-        for (size_t i = 0; i < metadata_shape.size(); i++) {
+        // NOTE (Ethan): We start at second one because model metadata includes a -1 entry
+        //               for batch dimension. Should this be the the case, and should we
+        //               handle it this way?
+        // TODO (Ethan): Variable dims are currently hard-coded to 10. Need to make this configurable
+        //               per-input.
+        for (size_t i = 1; i < metadata_shape.size(); i++) {
             const int64_t dim = metadata_shape[i];
-            shape->push_back(dim > 0 ? dim : 1);
+            shape->push_back(dim > 0 ? dim : 10);
         }
         return true;
     }
@@ -122,14 +127,6 @@ namespace benchmark {
 
             std::vector<int64_t> request_shape;
             BuildRequestShape(input_spec.shape, batch_size, &request_shape);
-
-            // DEBUGGING - print request shape
-            std::fprintf(stderr, "Built request input shape: [%d", request_shape[0]);
-            for (size_t j = 1; j < request_shape.size(); j++) {
-                std::fprintf(stderr, ", %d", request_shape[j]);
-            }
-            std::fprintf(stderr, "]\n");
-
             for (size_t j = 0; j < request_shape.size(); j++) {
                 input->add_shape(request_shape[j]);
             }
@@ -252,8 +249,10 @@ namespace benchmark {
         for (int i = 0; i < args.model_count; i++) {
             nereid::ModelSpec spec = {};
             if (!nereid::LoadModelSpec(stub.get(), args.model_names[i], &spec, error_message)) {
-                cleanup();
-                return false;
+                // cleanup();
+                // return false;
+                std::fprintf(stderr, "[WARNING] Skipping model \"%s\" due to error: %s\n", args.model_names[i], error_message->c_str());
+                continue;
             }
             models.push_back(spec);
         }
