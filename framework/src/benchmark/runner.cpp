@@ -154,23 +154,6 @@ namespace benchmark {
                 input->add_shape(request_shape[j]);
             }
             request_shapes.push_back(request_shape);
-
-            // size_t element_count = 1;
-            // for (size_t j = 0; j < request_shape.size(); j++) {
-            //     if (request_shape[j] <= 0) {
-            //         utils::SetError(error_message, std::string("invalid request shape for model: ") + spec.name);
-            //         return false;
-            //     }
-            //     element_count *= static_cast<size_t>(request_shape[j]);
-            // }
-
-            // const size_t bytes_per_element = nereid::DatatypeSizeBytes(input_spec.datatype, error_message);
-            // if (bytes_per_element == 0) {
-            //     return false;
-            // }
-
-            // std::string raw_contents(element_count * bytes_per_element, '\0');
-            // request.add_raw_input_contents(raw_contents);
         }
 
         for (size_t i = 0; i < spec.outputs.size(); i++) {
@@ -331,12 +314,10 @@ namespace benchmark {
                 analysis::RunningStatsInit(latency_stats);
                 analysis::RunningStatsInit(throughput_stats);
 
-                //for (int trial = 0; trial < args.num_trials; trial++) {
                 if (!RunBatchTrials(stub.get(), spec, args.num_trials, batch_size, &latency_stats, &throughput_stats, error_message)) {
                     cleanup();
                     return false;
                 }
-                //}
 
                 nlohmann::json summary_row = nlohmann::json::object();
                 summary_row["model_name"] = spec.name;
