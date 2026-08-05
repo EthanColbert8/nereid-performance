@@ -4,7 +4,11 @@
 !/**/
 !LICENSE
 
+# dev environment
+.vscode/
+
 # artifacts
+build/
 /models/
 /scans/
 data/
