@@ -4,7 +4,7 @@
 #include <string>
 #include <sys/types.h>
 #include <sys/wait.h>
-#include <uinstd.h>
+#include <unistd.h>
 
 namespace process {
 

@@ -14,7 +14,7 @@ namespace benchmark {
         const int* batch_sizes;
         int batch_size_count;
         int num_trials;
-    }
+    };
 
     bool BuildBenchmarkContext(const cli::Args& args, BenchmarkContext* context, pid_t server_pid, std::string* error_message);
 

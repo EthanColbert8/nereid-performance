@@ -139,9 +139,7 @@ namespace benchmark {
         return true;
     }
 
-    // TODO (Ethan): Remove everything related to process control and put it in its own module.
-    // bool RunBenchmark(const cli::Args& args, nlohmann::json* report, std::string* error_message) {
-    bool RunBenchmark(const BenchmarkContext ctx, nlohmann::json* report, std::string* error_message) {
+    bool RunBenchmark(const BenchmarkContext& ctx, nlohmann::json* report, std::string* error_message) {
         if (report == nullptr) {
             utils::SetError(error_message, "report output pointer is null");
             return false;
@@ -200,7 +198,6 @@ namespace benchmark {
                 analysis::RunningStatsInit(throughput_stats);
 
                 if (!RunBatchTrials(stub.get(), spec, ctx.num_trials, batch_size, &latency_stats, &throughput_stats, error_message)) {
-                    cleanup();
                     return false;
                 }
 
@@ -222,7 +219,7 @@ namespace benchmark {
         config_json["num_trials"] = ctx.num_trials;
         // config_json["server_binary_path"] = ctx.server_binary_path;
         config_json["server_address"] = ctx.server_address;
-        config_json["output_path"] = ctx.output_path;
+        // config_json["output_path"] = ctx.output_path;
 
         nlohmann::json batch_sizes_json = nlohmann::json::array();
         for (int i = 0; i < ctx.batch_size_count; i++) {
@@ -250,7 +247,6 @@ namespace benchmark {
         (*report)["models"] = report_models;
         (*report)["summary"] = report_summary;
 
-        cleanup();
         return true;
     }
 

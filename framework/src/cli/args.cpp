@@ -21,17 +21,23 @@ namespace cli {
     static int64_t default_sv_features[] = {11, 10};
     static int64_t default_sv_mask[] = {1, 10};
 
+    static int64_t* default_input_shapes[] = {
+        default_pf_points, default_pf_features, default_pf_mask,
+        default_sv_points, default_sv_features, default_sv_mask
+    };
+    static int64_t default_input_shape_counts[] = {2, 2, 2, 2, 2, 2};
+
     constexpr const PartialModelSpec DEFAULT_MODEL_SPECS[] = {
         PartialModelSpec{
             name: "particlenet_AK4_PT",
-            input_shapes: {default_pf_points, default_pf_features, default_pf_mask, default_sv_points, default_sv_features, default_sv_mask},
-            input_shape_counts: {2, 2, 2, 2, 2, 2},
+            input_shapes: default_input_shapes,
+            input_shape_counts: default_input_shape_counts,
             input_count: 6
         },
         PartialModelSpec{
             name: "particlenet_AK4",
-            input_shapes: {default_pf_points, default_pf_features, default_pf_mask, default_sv_points, default_sv_features, default_sv_mask},
-            input_shape_counts: {2, 2, 2, 2, 2, 2},
+            input_shapes: default_input_shapes,
+            input_shape_counts: default_input_shape_counts,
             input_count: 6
         },
     };
@@ -108,7 +114,7 @@ Options:
         args.server_address = DEFAULT_SERVER_ADDRESS;
         args.server_port = DEFAULT_SERVER_PORT;
         args.output_path = DEFAULT_OUTPUT_PATH;
-        args.model_names = DEFAULT_MODEL_SPECS;
+        args.model_specs = DEFAULT_MODEL_SPECS;
         args.model_count = 2;
         args.batch_sizes = DEFAULT_BATCH_SIZES;
         args.batch_size_count = static_cast<int>(sizeof(DEFAULT_BATCH_SIZES) / sizeof(DEFAULT_BATCH_SIZES[0]));

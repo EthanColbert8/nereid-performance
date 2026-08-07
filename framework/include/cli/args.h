@@ -9,7 +9,7 @@ namespace cli {
         int64_t** input_shapes;
         int64_t* input_shape_counts;
         int input_count;
-    }
+    };
 
     struct Args {
         int num_trials;

@@ -7,6 +7,7 @@
 #include "benchmark/context.h"
 #include "benchmark/runner.h"
 #include "cli/args.h"
+#include "utils/errors.h"
 
 bool WriteReport(const cli::Args& args, const nlohmann::json& report, std::string* error_message) {
     FILE* file = std::fopen(args.output_path, "w");
@@ -31,7 +32,7 @@ int main(int argc, char* argv[]) {
     cli::Args args = cli::ParseArgs(argc, argv);
 
     std::string error_message;
-    BenchmarkContext ctx;
+    benchmark::BenchmarkContext ctx;
     nlohmann::json report;
 
     process::ServerProcess server = {};
