@@ -82,11 +82,13 @@ namespace benchmark {
         }
 
         inference::ModelInferResponse response;
-        grpc::ClientContext infer_context;
 
         // the tight loop around running inference trials
         for (int trial = 0; trial < num_trials; trial++) {
             request.clear_raw_input_contents();
+
+            // ClientContext is single-use for some reason...
+            grpc::ClientContext infer_context;
 
             std::vector<std::string> raw_input_buffers;
             raw_input_buffers.reserve(spec.inputs.size());
