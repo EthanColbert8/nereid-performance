@@ -1,4 +1,5 @@
 #include "benchmark/runner.h"
+#include "benchmark/context.h"
 #include "nereid/model.h"
 #include "nereid/service.h"
 #include "analysis/stats.h"
@@ -24,65 +25,6 @@
 
 namespace benchmark {
 
-    constexpr int STARTUP_TIMEOUT_SECONDS = 120;
-
-    struct ServerProcess {
-        pid_t pid;
-    };
-
-    bool LaunchServer(const char* server_binary_path, ServerProcess* server, std::string* error_message) {
-        pid_t pid = fork();
-        if (pid < 0) {
-            utils::SetError(error_message, "failed to fork server process");
-            return false;
-        }
-
-        if (pid == 0) {
-            execl(server_binary_path, server_binary_path, static_cast<char*>(nullptr));
-            _exit(127);
-        }
-
-        server->pid = pid;
-        return true;
-    }
-
-    void StopServer(const ServerProcess& server) {
-        if (server.pid <= 0) {
-            return;
-        }
-
-        kill(server.pid, SIGTERM);
-
-        for (int i = 0; i < 20; i++) {
-            int status = 0;
-            const pid_t result = waitpid(server.pid, &status, WNOHANG);
-            if (result == server.pid) {
-                return;
-            }
-
-            usleep(100000);
-        }
-
-        kill(server.pid, SIGKILL);
-        int status = 0;
-        waitpid(server.pid, &status, 0);
-    }
-
-    bool BuildRequestShape(const std::vector<int64_t>& metadata_shape, int batch_size, std::vector<int64_t>* shape) {
-        shape->clear();
-        shape->push_back(batch_size);
-        // NOTE (Ethan): We start at second one because model metadata includes a -1 entry
-        //               for batch dimension. Should this be the the case, and should we
-        //               handle it this way?
-        // TODO (Ethan): Variable dims are currently hard-coded to 10. Need to make this configurable
-        //               per-input.
-        for (size_t i = 1; i < metadata_shape.size(); i++) {
-            const int64_t dim = metadata_shape[i];
-            shape->push_back(dim > 0 ? dim : 10);
-        }
-        return true;
-    }
-
     bool ValidateInferResponse(const nereid::ModelSpec& spec, const inference::ModelInferResponse& response, int batch_size, std::string* error_message) {
         if (response.outputs_size() != static_cast<int>(spec.outputs.size())) {
             utils::SetError(error_message, std::string("unexpected output count for model: ") + spec.name);
@@ -105,9 +47,10 @@ namespace benchmark {
         return true;
     }
 
-    bool RunBatchTrial(
+    bool RunBatchTrials(
         inference::GRPCInferenceService::Stub* stub,
         const nereid::ModelSpec& spec,
+        int num_trials,
         int batch_size,
         analysis::RunningStats* latency_stats,
         analysis::RunningStats* throughput_stats,
@@ -121,32 +64,16 @@ namespace benchmark {
 
         for (size_t i = 0; i < spec.inputs.size(); i++) {
             const nereid::TensorSpec& input_spec = spec.inputs[i];
+            
             auto* input = request.add_inputs();
             input->set_name(input_spec.name);
             input->set_datatype(input_spec.datatype);
 
-            std::vector<int64_t> request_shape;
-            BuildRequestShape(input_spec.shape, batch_size, &request_shape);
-            for (size_t j = 0; j < request_shape.size(); j++) {
-                input->add_shape(request_shape[j]);
+            // Add shape values to the input one at a time for some reason...
+            input->add_shape(batch_size);
+            for (size_t j = 0; j < input_spec.shape.size(); j++) {
+                input->add_shape(input_spec.shape[j]);
             }
-
-            size_t element_count = 1;
-            for (size_t j = 0; j < request_shape.size(); j++) {
-                if (request_shape[j] <= 0) {
-                    utils::SetError(error_message, std::string("invalid request shape for model: ") + spec.name);
-                    return false;
-                }
-                element_count *= static_cast<size_t>(request_shape[j]);
-            }
-
-            const size_t bytes_per_element = nereid::DatatypeSizeBytes(input_spec.datatype, error_message);
-            if (bytes_per_element == 0) {
-                return false;
-            }
-
-            std::string raw_contents(element_count * bytes_per_element, '\0');
-            request.add_raw_input_contents(raw_contents);
         }
 
         for (size_t i = 0; i < spec.outputs.size(); i++) {
@@ -155,52 +82,66 @@ namespace benchmark {
         }
 
         inference::ModelInferResponse response;
-        grpc::ClientContext infer_context;
 
-        const auto start_time = std::chrono::steady_clock::now();
-        grpc::Status infer_status = stub->ModelInfer(&infer_context, request, &response);
-        const auto end_time = std::chrono::steady_clock::now();
+        // the tight loop around running inference trials
+        for (int trial = 0; trial < num_trials; trial++) {
+            request.clear_raw_input_contents();
 
-        if (!infer_status.ok()) {
-            char error_buf[400];
-            std::snprintf(error_buf, sizeof(error_buf), "inference failed for model \"%s\". Error code: %d, message: %s", spec.name.c_str(), infer_status.error_code(), infer_status.error_message().c_str());
-            utils::SetError(error_message, error_buf);
-            return false;
+            // ClientContext is single-use for some reason...
+            grpc::ClientContext infer_context;
+
+            std::vector<std::string> raw_input_buffers;
+            raw_input_buffers.reserve(spec.inputs.size());
+
+            for (size_t i = 0; i < spec.inputs.size(); i++) {
+                const nereid::TensorSpec& input_spec = spec.inputs[i];
+
+                size_t element_count = batch_size;
+                for (size_t j = 0; j < input_spec.shape.size(); j++) {
+                    element_count *= static_cast<size_t>(input_spec.shape[j]);
+                }
+                const size_t bytes_per_element = nereid::DatatypeSizeBytes(input_spec.datatype, error_message);
+                if (bytes_per_element == 0) {
+                    return false;
+                }
+
+                // TODO (Ethan): Actually use random numbers, not zeros.
+                std::string raw_contents(element_count * bytes_per_element, '\0');
+                raw_input_buffers.push_back(std::move(raw_contents));
+            }
+
+            const auto start_time = std::chrono::steady_clock::now();
+
+            for (size_t i = 0; i < raw_input_buffers.size(); i++) {
+                request.add_raw_input_contents(raw_input_buffers[i]);
+            }
+
+            grpc::Status infer_status = stub->ModelInfer(&infer_context, request, &response);
+
+            if (!infer_status.ok()) {
+                char error_buf[400];
+                std::snprintf(error_buf, sizeof(error_buf), "inference failed for model \"%s\". Error code: %d, message: %s", spec.name.c_str(), infer_status.error_code(), infer_status.error_message().c_str());
+                utils::SetError(error_message, error_buf);
+                return false;
+            }
+
+            const auto end_time = std::chrono::steady_clock::now();
+
+            if (!ValidateInferResponse(spec, response, batch_size, error_message)) {
+                return false;
+            }
+
+            double latency_ms = std::chrono::duration<double, std::milli>(end_time - start_time).count();
+            double throughput = static_cast<double>(batch_size) / (latency_ms / 1000.0);
+
+            analysis::RunningStatsPush(*latency_stats, latency_ms);
+            analysis::RunningStatsPush(*throughput_stats, throughput);
         }
-
-        if (!ValidateInferResponse(spec, response, batch_size, error_message)) {
-            return false;
-        }
-
-        const double latency_ms = std::chrono::duration<double, std::milli>(end_time - start_time).count();
-        const double throughput = static_cast<double>(batch_size) / (latency_ms / 1000.0);
-
-        analysis::RunningStatsPush(*latency_stats, latency_ms);
-        analysis::RunningStatsPush(*throughput_stats, throughput);
 
         return true;
     }
 
-    bool WriteReport(const cli::Args& args, const nlohmann::json& report, std::string* error_message) {
-        FILE* file = std::fopen(args.output_path, "w");
-        if (file == nullptr) {
-            utils::SetError(error_message, std::string("failed to open output file: ") + args.output_path);
-            return false;
-        }
-
-        const std::string serialized = report.dump(4);
-        const size_t written = std::fwrite(serialized.data(), 1, serialized.size(), file);
-        std::fclose(file);
-
-        if (written != serialized.size()) {
-            utils::SetError(error_message, std::string("failed to write output file: ") + args.output_path);
-            return false;
-        }
-
-        return true;
-    }
-
-    bool RunBenchmark(const cli::Args& args, nlohmann::json* report, std::string* error_message) {
+    bool RunBenchmark(const BenchmarkContext& ctx, nlohmann::json* report, std::string* error_message) {
         if (report == nullptr) {
             utils::SetError(error_message, "report output pointer is null");
             return false;
@@ -208,30 +149,8 @@ namespace benchmark {
 
         *report = nlohmann::json::object();
 
-        ServerProcess server = {};
-        server.pid = -1;
-        bool server_started = false;
-
-        auto cleanup = [&]() {
-            if (server_started) {
-                StopServer(server);
-                server_started = false;
-            }
-        };
-
-        if (!LaunchServer(args.server_binary_path, &server, error_message)) {
-            cleanup(); // NOTE (Ethan): `server_started` is guaranteed to be false here?
-            return false;
-        }
-        server_started = true;
-
-        auto channel = grpc::CreateChannel(args.server_address, grpc::InsecureChannelCredentials());
+        auto channel = grpc::CreateChannel(ctx.server_address, grpc::InsecureChannelCredentials());
         auto stub = inference::GRPCInferenceService::NewStub(channel);
-
-        if (!nereid::WaitForServerReady(stub.get(), server.pid, STARTUP_TIMEOUT_SECONDS, error_message)) {
-            cleanup();
-            return false;
-        }
 
         grpc::ClientContext server_metadata_context;
         inference::ServerMetadataRequest server_metadata_request;
@@ -239,29 +158,14 @@ namespace benchmark {
         grpc::Status server_metadata_status = stub->ServerMetadata(&server_metadata_context, server_metadata_request, &server_metadata_response);
         if (!server_metadata_status.ok()) {
             utils::SetError(error_message, "failed to fetch server metadata");
-            cleanup();
             return false;
-        }
-
-        std::vector<nereid::ModelSpec> models;
-        models.reserve(static_cast<size_t>(args.model_count));
-
-        for (int i = 0; i < args.model_count; i++) {
-            nereid::ModelSpec spec = {};
-            if (!nereid::LoadModelSpec(stub.get(), args.model_names[i], &spec, error_message)) {
-                // cleanup();
-                // return false;
-                std::fprintf(stderr, "[WARNING] Skipping model \"%s\" due to error: %s\n", args.model_names[i], error_message->c_str());
-                continue;
-            }
-            models.push_back(spec);
         }
 
         nlohmann::json report_models = nlohmann::json::array();
         nlohmann::json report_summary = nlohmann::json::array();
 
-        for (size_t i = 0; i < models.size(); i++) {
-            const nereid::ModelSpec& spec = models[i];
+        for (size_t i = 0; i < ctx.model_count; i++) {
+            const nereid::ModelSpec& spec = ctx.model_specs[i];
             nlohmann::json model_json = nlohmann::json::object();
             model_json["name"] = spec.name;
             model_json["version"] = spec.version;
@@ -288,24 +192,21 @@ namespace benchmark {
             model_json["outputs"] = outputs_json;
             report_models.push_back(model_json);
 
-            for (int batch_index = 0; batch_index < args.batch_size_count; batch_index++) {
-                const int batch_size = args.batch_sizes[batch_index];
+            for (int batch_index = 0; batch_index < ctx.batch_size_count; batch_index++) {
+                const int batch_size = ctx.batch_sizes[batch_index];
                 analysis::RunningStats latency_stats;
                 analysis::RunningStats throughput_stats;
                 analysis::RunningStatsInit(latency_stats);
                 analysis::RunningStatsInit(throughput_stats);
 
-                for (int trial = 0; trial < args.num_trials; trial++) {
-                    if (!RunBatchTrial(stub.get(), spec, batch_size, &latency_stats, &throughput_stats, error_message)) {
-                        cleanup();
-                        return false;
-                    }
+                if (!RunBatchTrials(stub.get(), spec, ctx.num_trials, batch_size, &latency_stats, &throughput_stats, error_message)) {
+                    return false;
                 }
 
                 nlohmann::json summary_row = nlohmann::json::object();
                 summary_row["model_name"] = spec.name;
                 summary_row["batch_size"] = batch_size;
-                summary_row["num_trials"] = args.num_trials;
+                summary_row["num_trials"] = ctx.num_trials;
                 summary_row["mean_latency_ms"] = analysis::RunningStatsMean(latency_stats);
                 summary_row["std_latency_ms"] = analysis::RunningStatsStdDev(latency_stats);
                 summary_row["stderr_latency_ms"] = analysis::RunningStatsStdErr(latency_stats);
@@ -317,22 +218,22 @@ namespace benchmark {
         }
 
         nlohmann::json config_json = nlohmann::json::object();
-        config_json["num_trials"] = args.num_trials;
-        config_json["server_binary_path"] = args.server_binary_path;
-        config_json["server_address"] = args.server_address;
-        config_json["output_path"] = args.output_path;
+        config_json["num_trials"] = ctx.num_trials;
+        // config_json["server_binary_path"] = ctx.server_binary_path;
+        config_json["server_address"] = ctx.server_address;
+        // config_json["output_path"] = ctx.output_path;
 
         nlohmann::json batch_sizes_json = nlohmann::json::array();
-        for (int i = 0; i < args.batch_size_count; i++) {
-            batch_sizes_json.push_back(args.batch_sizes[i]);
+        for (int i = 0; i < ctx.batch_size_count; i++) {
+            batch_sizes_json.push_back(ctx.batch_sizes[i]);
         }
         config_json["batch_sizes"] = batch_sizes_json;
 
-        nlohmann::json model_names_json = nlohmann::json::array();
-        for (int i = 0; i < args.model_count; i++) {
-            model_names_json.push_back(args.model_names[i]);
-        }
-        config_json["model_names"] = model_names_json;
+        // nlohmann::json model_names_json = nlohmann::json::array();
+        // for (int i = 0; i < ctx.model_count; i++) {
+        //     model_names_json.push_back(ctx.model_names[i]);
+        // }
+        // config_json["model_names"] = model_names_json;
 
         nlohmann::json server_json = nlohmann::json::object();
         server_json["name"] = server_metadata_response.name();
@@ -348,12 +249,6 @@ namespace benchmark {
         (*report)["models"] = report_models;
         (*report)["summary"] = report_summary;
 
-        if (!WriteReport(args, *report, error_message)) {
-            cleanup();
-            return false;
-        }
-
-        cleanup();
         return true;
     }
 
