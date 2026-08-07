@@ -1,6 +1,7 @@
 #include <cerrno>
 #include <climits>
 #include <cstdio>
+#include <cstdint>
 #include <cstdlib>
 #include <cstring>
 
@@ -9,12 +10,30 @@
 namespace cli {
 
     constexpr const char* const DEFAULT_SERVER_BINARY_PATH = "./nereid-server";
-    constexpr const char* const DEFAULT_SERVER_ADDRESS = "localhost:50051";
+    constexpr const char* const DEFAULT_SERVER_ADDRESS = "localhost";
+    constexpr const char* const DEFAULT_SERVER_PORT = "50051";
     constexpr const char* const DEFAULT_OUTPUT_PATH = "nereid_benchmark_summary.json";
 
-    constexpr const char* const DEFAULT_MODEL_NAMES[] = {
-        "particlenet_AK4_PT",
-        "particlenet_AK4",
+    static int64_t default_pf_points[] = {2, 100};
+    static int64_t default_pf_features[] = {20, 100};
+    static int64_t default_pf_mask[] = {1, 100};
+    static int64_t default_sv_points[] = {2, 10};
+    static int64_t default_sv_features[] = {11, 10};
+    static int64_t default_sv_mask[] = {1, 10};
+
+    constexpr const PartialModelSpec DEFAULT_MODEL_SPECS[] = {
+        PartialModelSpec{
+            name: "particlenet_AK4_PT",
+            input_shapes: {default_pf_points, default_pf_features, default_pf_mask, default_sv_points, default_sv_features, default_sv_mask},
+            input_shape_counts: {2, 2, 2, 2, 2, 2},
+            input_count: 6
+        },
+        PartialModelSpec{
+            name: "particlenet_AK4",
+            input_shapes: {default_pf_points, default_pf_features, default_pf_mask, default_sv_points, default_sv_features, default_sv_mask},
+            input_shape_counts: {2, 2, 2, 2, 2, 2},
+            input_count: 6
+        },
     };
 
     constexpr int DEFAULT_BATCH_SIZES[] = {
@@ -55,7 +74,7 @@ Options:
             return false;
         }
 
-        if (args.model_names == nullptr || args.model_count <= 0) {
+        if (args.model_specs == nullptr || args.model_count <= 0) {
             return false;
         }
 
@@ -87,9 +106,10 @@ Options:
         args.num_trials = 100;
         args.server_binary_path = DEFAULT_SERVER_BINARY_PATH;
         args.server_address = DEFAULT_SERVER_ADDRESS;
+        args.server_port = DEFAULT_SERVER_PORT;
         args.output_path = DEFAULT_OUTPUT_PATH;
-        args.model_names = DEFAULT_MODEL_NAMES;
-        args.model_count = static_cast<int>(sizeof(DEFAULT_MODEL_NAMES) / sizeof(DEFAULT_MODEL_NAMES[0]));
+        args.model_names = DEFAULT_MODEL_SPECS;
+        args.model_count = 2;
         args.batch_sizes = DEFAULT_BATCH_SIZES;
         args.batch_size_count = static_cast<int>(sizeof(DEFAULT_BATCH_SIZES) / sizeof(DEFAULT_BATCH_SIZES[0]));
 
