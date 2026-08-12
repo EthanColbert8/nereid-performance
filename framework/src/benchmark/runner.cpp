@@ -18,12 +18,30 @@
 #include <sys/wait.h>
 #include <unistd.h>
 #include <vector>
+#include <random>
 
 #include <grpcpp/grpcpp.h>
 #include "grpc_service.grpc.pb.h"
 #include "grpc_service.pb.h"
 
 namespace benchmark {
+
+    struct request_tensor_buffer_f32 {
+        float* data;
+        size_t count;
+        // std::vector<int64_t> shape;
+    };
+
+    struct standard_normal_generator {
+        std::mt19937* generator;
+        std::normal_distribution<float> dist;
+    };
+
+    void FillRandomFloatsStandardNormal(request_tensor_buffer_f32 buffer, standard_normal_generator& rand_gen) {
+        for (size_t i = 0; i < buffer.count; i++) {
+            buffer.data[i] = rand_gen.dist(*(rand_gen.generator));
+        }
+    }
 
     bool ValidateInferResponse(const nereid::ModelSpec& spec, const inference::ModelInferResponse& response, int batch_size, std::string* error_message) {
         if (response.outputs_size() != static_cast<int>(spec.outputs.size())) {
@@ -50,6 +68,7 @@ namespace benchmark {
     bool RunBatchTrials(
         inference::GRPCInferenceService::Stub* stub,
         const nereid::ModelSpec& spec,
+        standard_normal_generator& rand_gen,
         int num_trials,
         int batch_size,
         analysis::RunningStats* latency_stats,
@@ -62,18 +81,26 @@ namespace benchmark {
             request.set_model_version(spec.version);
         }
 
+        // Pre-allocating all the input buffers
+        std::vector<request_tensor_buffer_f32> input_buffers;
+        input_buffers.reserve(spec.inputs.size());
+
         for (size_t i = 0; i < spec.inputs.size(); i++) {
             const nereid::TensorSpec& input_spec = spec.inputs[i];
             
             auto* input = request.add_inputs();
             input->set_name(input_spec.name);
             input->set_datatype(input_spec.datatype);
-
-            // Add shape values to the input one at a time for some reason...
+            
+            size_t element_count = batch_size;
             input->add_shape(batch_size);
             for (size_t j = 0; j < input_spec.shape.size(); j++) {
                 input->add_shape(input_spec.shape[j]);
+                element_count *= static_cast<size_t>(input_spec.shape[j]);
             }
+
+            float* buffer = new float[element_count];
+            input_buffers.push_back({buffer, element_count});
         }
 
         for (size_t i = 0; i < spec.outputs.size(); i++) {
@@ -90,30 +117,15 @@ namespace benchmark {
             // ClientContext is single-use for some reason...
             grpc::ClientContext infer_context;
 
-            std::vector<std::string> raw_input_buffers;
-            raw_input_buffers.reserve(spec.inputs.size());
-
-            for (size_t i = 0; i < spec.inputs.size(); i++) {
-                const nereid::TensorSpec& input_spec = spec.inputs[i];
-
-                size_t element_count = batch_size;
-                for (size_t j = 0; j < input_spec.shape.size(); j++) {
-                    element_count *= static_cast<size_t>(input_spec.shape[j]);
-                }
-                const size_t bytes_per_element = nereid::DatatypeSizeBytes(input_spec.datatype, error_message);
-                if (bytes_per_element == 0) {
-                    return false;
-                }
-
-                // TODO (Ethan): Actually use random numbers, not zeros.
-                std::string raw_contents(element_count * bytes_per_element, '\0');
-                raw_input_buffers.push_back(std::move(raw_contents));
+            for (size_t i = 0; i < input_buffers.size(); i++) {
+                FillRandomFloatsStandardNormal(input_buffers[i], rand_gen);
             }
 
             const auto start_time = std::chrono::steady_clock::now();
 
-            for (size_t i = 0; i < raw_input_buffers.size(); i++) {
-                request.add_raw_input_contents(raw_input_buffers[i]);
+            // Include input preparation for RPC call in the timing
+            for (size_t i = 0; i < input_buffers.size(); i++) {
+                request.add_raw_input_contents(input_buffers[i].data, input_buffers[i].count * sizeof(float));
             }
 
             grpc::Status infer_status = stub->ModelInfer(&infer_context, request, &response);
@@ -138,6 +150,11 @@ namespace benchmark {
             analysis::RunningStatsPush(*throughput_stats, throughput);
         }
 
+        // clean up the buffers we allocated
+        for (int i = 0; i < input_buffers.size(); i++) {
+            delete[] input_buffers[i].data;
+        }
+
         return true;
     }
 
@@ -148,6 +165,10 @@ namespace benchmark {
         }
 
         *report = nlohmann::json::object();
+
+        std::random_device rd;
+        std::mt19937 generator(rd());
+        standard_normal_generator rand_gen{&generator, std::normal_distribution<float>(0.0, 1.0)};
 
         auto channel = grpc::CreateChannel(ctx.server_address, grpc::InsecureChannelCredentials());
         auto stub = inference::GRPCInferenceService::NewStub(channel);
@@ -199,7 +220,7 @@ namespace benchmark {
                 analysis::RunningStatsInit(latency_stats);
                 analysis::RunningStatsInit(throughput_stats);
 
-                if (!RunBatchTrials(stub.get(), spec, ctx.num_trials, batch_size, &latency_stats, &throughput_stats, error_message)) {
+                if (!RunBatchTrials(stub.get(), spec, rand_gen, ctx.num_trials, batch_size, &latency_stats, &throughput_stats, error_message)) {
                     return false;
                 }
 
