@@ -21,6 +21,7 @@ namespace cli {
         int model_count;
         const int* batch_sizes;
         int batch_size_count;
+        bool launch_server;
     };
 
     Args ParseArgs(int argc, char* argv[]);

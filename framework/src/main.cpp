@@ -46,12 +46,14 @@ int main(int argc, char* argv[]) {
         }
     };
 
-    if (!process::LaunchServer(args.server_binary_path, &server, &error_message)) {
-        std::fprintf(stderr, "Error: %s\n", error_message.c_str());
-        cleanup(); // NOTE (Ethan): `server_started` is guaranteed to be false here?
-        return EXIT_FAILURE;
+    if (args.launch_server) {
+        if (!process::LaunchServer(args.server_binary_path, &server, &error_message)) {
+            std::fprintf(stderr, "Error: %s\n", error_message.c_str());
+            cleanup(); // NOTE (Ethan): `server_started` is guaranteed to be false here?
+            return EXIT_FAILURE;
+        }
+        server_started = true;
     }
-    server_started = true;
 
     // NOTE (Ethan): We wait for server readiness inside `BuildBenchmarkContext`
     if (!benchmark::BuildBenchmarkContext(args, &ctx, server.pid, &error_message)) {

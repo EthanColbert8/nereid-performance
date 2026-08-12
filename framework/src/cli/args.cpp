@@ -53,6 +53,7 @@ Options:
         --server-binary <path>: Path to the Nereid server binary (default ./nereid-server)
         --server-address <host:port>: gRPC address for the server (default localhost:50051)
         --output <path>: Summary JSON output path (default nereid_benchmark_summary.json)
+        --launch-server: Launch a server process (default false)
 )";
 
     [[noreturn]] void PrintUsageAndExit(int exit_code, const char* message = nullptr) {
@@ -111,6 +112,7 @@ Options:
         Args args = {};
         args.num_trials = 100;
         args.server_binary_path = DEFAULT_SERVER_BINARY_PATH;
+        args.launch_server = false;
         args.server_address = DEFAULT_SERVER_ADDRESS;
         args.server_port = DEFAULT_SERVER_PORT;
         args.output_path = DEFAULT_OUTPUT_PATH;
@@ -127,6 +129,11 @@ Options:
         for (int i = 1; i < argc; i++) {
             if (std::strcmp(argv[i], "--help") == 0 || std::strcmp(argv[i], "-h") == 0) {
                 PrintUsageAndExit(EXIT_SUCCESS);
+            }
+
+            if (std::strcmp(argv[i], "--launch-server") == 0) {
+                args.launch_server = true;
+                continue;
             }
 
             if (std::strcmp(argv[i], "--num-trials") == 0 || std::strcmp(argv[i], "-n") == 0) {
