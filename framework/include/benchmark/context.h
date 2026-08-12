@@ -16,6 +16,6 @@ namespace benchmark {
         int num_trials;
     };
 
-    bool BuildBenchmarkContext(const cli::Args& args, BenchmarkContext* context, pid_t server_pid, std::string* error_message);
+    bool BuildBenchmarkContext(const cli::Args& args, BenchmarkContext* context, std::string* error_message);
 
 } // namespace benchmark

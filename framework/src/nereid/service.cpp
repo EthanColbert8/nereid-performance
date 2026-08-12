@@ -1,4 +1,5 @@
 #include "nereid/service.h"
+#include "utils/address.h"
 #include "utils/errors.h"
 
 #include <chrono>
@@ -15,25 +16,15 @@ namespace nereid {
 
     constexpr int POLL_SLEEP_MICROSECONDS = 250000; // 250 milliseconds
 
-    size_t DatatypeSizeBytes(const std::string& datatype, std::string* error_message) {
-        if (datatype == "FP32" || datatype == "INT32" || datatype == "UINT32") {
-            return 4;
-        }
-        if (datatype == "FP64" || datatype == "INT64" || datatype == "UINT64") {
-            return 8;
-        }
-        if (datatype == "INT16" || datatype == "UINT16") {
-            return 2;
-        }
-        if (datatype == "INT8" || datatype == "UINT8" || datatype == "BOOL") {
-            return 1;
+    bool WaitForServerReady(const char* server_address, const char* server_port, pid_t server_pid, int startup_timeout_secs, std::string* error_message) {
+        std::string combined_server_address;
+        if (!utils::BuildAddress(server_address, server_port, &combined_server_address, error_message)) {
+            return false;
         }
 
-        utils::SetError(error_message, "unsupported tensor datatype: " + datatype);
-        return 0;
-    }
+        auto channel = grpc::CreateChannel(combined_server_address.c_str(), grpc::InsecureChannelCredentials());
+        auto stub = inference::GRPCInferenceService::NewStub(channel);
 
-    bool WaitForServerReady(inference::GRPCInferenceService::Stub* stub, pid_t server_pid, int startup_timeout_secs, std::string* error_message) {
         const auto deadline = std::chrono::steady_clock::now() + std::chrono::seconds(startup_timeout_secs);
 
         while (std::chrono::steady_clock::now() < deadline) {
@@ -54,6 +45,37 @@ namespace nereid {
             if (child_result > 0) {
                 utils::SetError(error_message, "server process exited before becoming ready");
                 return false;
+            }
+
+            usleep(POLL_SLEEP_MICROSECONDS);
+        }
+
+        utils::SetError(error_message, "timed out waiting for server readiness");
+        return false;
+    }
+
+    bool WaitForServerReady(const char* server_address, const char* server_port, int startup_timeout_secs, std::string* error_message) {
+        std::string combined_server_address;
+        if (!utils::BuildAddress(server_address, server_port, &combined_server_address, error_message)) {
+            return false;
+        }
+
+        auto channel = grpc::CreateChannel(combined_server_address.c_str(), grpc::InsecureChannelCredentials());
+        auto stub = inference::GRPCInferenceService::NewStub(channel);
+
+        const auto deadline = std::chrono::steady_clock::now() + std::chrono::seconds(startup_timeout_secs);
+
+        while (std::chrono::steady_clock::now() < deadline) {
+            grpc::ClientContext live_context;
+            grpc::ClientContext ready_context;
+            inference::ServerLiveResponse live_response;
+            inference::ServerReadyResponse ready_response;
+
+            const grpc::Status live_status = stub->ServerLive(&live_context, inference::ServerLiveRequest{}, &live_response);
+            const grpc::Status ready_status = stub->ServerReady(&ready_context, inference::ServerReadyRequest{}, &ready_response);
+
+            if (live_status.ok() && ready_status.ok() && live_response.live() && ready_response.ready()) {
+                return true;
             }
 
             usleep(POLL_SLEEP_MICROSECONDS);

@@ -8,9 +8,24 @@
 
 namespace nereid {
 
+    enum TensorDtype {
+        INVALID,
+        BOOL,
+        INT8,
+        UINT8,
+        INT16,
+        UINT16,
+        INT32,
+        UINT32,
+        FP32,
+        INT64,
+        UINT64,
+        FP64,
+    };
+
     struct TensorSpec {
         std::string name;
-        std::string datatype;
+        TensorDtype dtype;
         std::vector<int64_t> shape;
     };
 
@@ -21,6 +36,10 @@ namespace nereid {
         std::vector<TensorSpec> inputs;
         std::vector<TensorSpec> outputs;
     };
+
+    TensorDtype StringToDtype(const std::string& dtype, std::string* error_message);
+    std::string DtypeToString(TensorDtype dtype);
+    size_t DtypeSizeBytes(TensorDtype dtype);
 
     bool LoadModelSpec(
         inference::GRPCInferenceService::Stub* stub,

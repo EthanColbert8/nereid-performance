@@ -1,7 +1,7 @@
 #include "benchmark/runner.h"
 #include "benchmark/context.h"
 #include "nereid/model.h"
-#include "nereid/service.h"
+// #include "nereid/service.h"
 #include "analysis/stats.h"
 #include "utils/errors.h"
 
@@ -90,7 +90,7 @@ namespace benchmark {
             
             auto* input = request.add_inputs();
             input->set_name(input_spec.name);
-            input->set_datatype(input_spec.datatype);
+            input->set_datatype(nereid::DtypeToString(input_spec.dtype));
             
             size_t element_count = batch_size;
             input->add_shape(batch_size);
@@ -166,6 +166,7 @@ namespace benchmark {
 
         *report = nlohmann::json::object();
 
+        // Create a single random number generator for whole benchmark run
         std::random_device rd;
         std::mt19937 generator(rd());
         standard_normal_generator rand_gen{&generator, std::normal_distribution<float>(0.0, 1.0)};
@@ -196,7 +197,7 @@ namespace benchmark {
             for (size_t j = 0; j < spec.inputs.size(); j++) {
                 nlohmann::json tensor_json = nlohmann::json::object();
                 tensor_json["name"] = spec.inputs[j].name;
-                tensor_json["datatype"] = spec.inputs[j].datatype;
+                tensor_json["datatype"] = nereid::DtypeToString(spec.inputs[j].dtype);
                 tensor_json["shape"] = spec.inputs[j].shape;
                 inputs_json.push_back(tensor_json);
             }
@@ -206,7 +207,7 @@ namespace benchmark {
             for (size_t j = 0; j < spec.outputs.size(); j++) {
                 nlohmann::json tensor_json = nlohmann::json::object();
                 tensor_json["name"] = spec.outputs[j].name;
-                tensor_json["datatype"] = spec.outputs[j].datatype;
+                tensor_json["datatype"] = nereid::DtypeToString(spec.outputs[j].dtype);
                 tensor_json["shape"] = spec.outputs[j].shape;
                 outputs_json.push_back(tensor_json);
             }

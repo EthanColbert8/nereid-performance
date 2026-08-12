@@ -9,6 +9,67 @@
 
 namespace nereid {
 
+    TensorDtype StringToDtype(const std::string& dtype, std::string* error_message) {
+        if (dtype == "BOOL") { return BOOL; }
+        else if (dtype == "INT8") { return INT8; }
+        else if (dtype == "UINT8") { return UINT8; }
+        else if (dtype == "INT16") { return INT16; }
+        else if (dtype == "UINT16") { return UINT16; }
+        else if (dtype == "INT32") { return INT32; }
+        else if (dtype == "UINT32") { return UINT32; }
+        else if (dtype == "FP32") { return FP32; }
+        else if (dtype == "INT64") { return INT64; }
+        else if (dtype == "UINT64") { return UINT64; }
+        else if (dtype == "FP64") { return FP64; }
+        else {
+            utils::SetError(error_message, "invalid datatype: " + dtype);
+            return INVALID;
+        }
+    }
+
+    std::string DtypeToString(TensorDtype dtype) {
+        switch (dtype) {
+            case BOOL: return "BOOL";
+            case INT8: return "INT8";
+            case UINT8: return "UINT8";
+            case INT16: return "INT16";
+            case UINT16: return "UINT16";
+            case INT32: return "INT32";
+            case UINT32: return "UINT32";
+            case FP32: return "FP32";
+            case INT64: return "INT64";
+            case UINT64: return "UINT64";
+            case FP64: return "FP64";
+            default: return "INVALID";
+        }
+    }
+
+    size_t DtypeSizeBytes(TensorDtype dtype) {
+        switch (dtype) {
+            case BOOL:
+            case INT8:
+            case UINT8:
+                return 1;
+
+            case INT16:
+            case UINT16:
+                return 2;
+
+            case INT32:
+            case UINT32:
+            case FP32:
+                return 4;
+
+            case INT64:
+            case UINT64:
+            case FP64:
+                return 8;
+
+            default:
+                return 0;
+        }
+    }
+
     bool LoadModelSpec(
         inference::GRPCInferenceService::Stub* stub,
         const char* model_name,
@@ -50,7 +111,11 @@ namespace nereid {
             const auto& input = metadata_response.inputs(i);
             TensorSpec tensor = {};
             tensor.name = input.name();
-            tensor.datatype = input.datatype();
+
+            TensorDtype dtype = StringToDtype(input.datatype(), error_message);
+            if (dtype == INVALID) { return false; }
+            tensor.dtype = dtype;
+
             for (int j = 0; j < input.shape_size(); j++) {
                 tensor.shape.push_back(input.shape(j));
             }
@@ -61,7 +126,11 @@ namespace nereid {
             const auto& output = metadata_response.outputs(i);
             TensorSpec tensor = {};
             tensor.name = output.name();
-            tensor.datatype = output.datatype();
+            
+            TensorDtype dtype = StringToDtype(output.datatype(), error_message);
+            if (dtype == INVALID) { return false; }
+            tensor.dtype = dtype;
+
             for (int j = 0; j < output.shape_size(); j++) {
                 tensor.shape.push_back(output.shape(j));
             }

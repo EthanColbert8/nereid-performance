@@ -1,13 +1,17 @@
+#include "cli/args.h"
+#include "process/control.h"
+#include "nereid/service.h"
+#include "benchmark/context.h"
+#include "benchmark/runner.h"
+#include "utils/errors.h"
+
 #include <cstdio>
 #include <cstdlib>
 #include <string>
+
 #include <nlohmann/json.hpp>
 
-#include "process/control.h"
-#include "benchmark/context.h"
-#include "benchmark/runner.h"
-#include "cli/args.h"
-#include "utils/errors.h"
+constexpr int STARTUP_TIMEOUT_SECONDS = 120;
 
 bool WriteReport(const cli::Args& args, const nlohmann::json& report, std::string* error_message) {
     FILE* file = std::fopen(args.output_path, "w");
@@ -35,45 +39,48 @@ int main(int argc, char* argv[]) {
     benchmark::BenchmarkContext ctx;
     nlohmann::json report;
 
-    process::ServerProcess server = {};
+    process::ServerProcess server;
     server.pid = -1;
-    bool server_started = false;
-
-    auto cleanup = [&]() {
-        if (server_started) {
-            process::StopServer(server);
-            server_started = false;
-        }
-    };
+    server.owned = false;
+    server.running = false;
 
     if (args.launch_server) {
         if (!process::LaunchServer(args.server_binary_path, &server, &error_message)) {
             std::fprintf(stderr, "Error: %s\n", error_message.c_str());
-            cleanup(); // NOTE (Ethan): `server_started` is guaranteed to be false here?
             return EXIT_FAILURE;
         }
-        server_started = true;
+        if (!nereid::WaitForServerReady(args.server_address, args.server_port, server.pid, STARTUP_TIMEOUT_SECONDS, &error_message)) {
+            std::fprintf(stderr, "Error: %s\n", error_message.c_str());
+            process::StopServer(server);
+            return EXIT_FAILURE;
+        }
+    }
+    else {
+        if (!nereid::WaitForServerReady(args.server_address, args.server_port, STARTUP_TIMEOUT_SECONDS, &error_message)) {
+            std::fprintf(stderr, "Error: %s\n", error_message.c_str());
+            process::StopServer(server);
+            return EXIT_FAILURE;
+        }
     }
 
-    // NOTE (Ethan): We wait for server readiness inside `BuildBenchmarkContext`
-    if (!benchmark::BuildBenchmarkContext(args, &ctx, server.pid, &error_message)) {
+    if (!benchmark::BuildBenchmarkContext(args, &ctx, &error_message)) {
         std::fprintf(stderr, "Error: %s\n", error_message.c_str());
-        cleanup();
+        process::StopServer(server);
         return EXIT_FAILURE;
     }
 
     if (!benchmark::RunBenchmark(ctx, &report, &error_message)) {
         std::fprintf(stderr, "Error: %s\n", error_message.c_str());
-        cleanup();
+        process::StopServer(server);
         return EXIT_FAILURE;
     }
 
     if (!WriteReport(args, report, &error_message)) {
         std::fprintf(stderr, "Error: %s\n", error_message.c_str());
-        cleanup();
+        process::StopServer(server);
         return EXIT_FAILURE;
     }
 
-    cleanup();
+    process::StopServer(server);
     return EXIT_SUCCESS;
 }

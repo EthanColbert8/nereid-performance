@@ -21,11 +21,13 @@ namespace process {
         }
 
         server->pid = pid;
+        server->owned = true;
+        server->running = true;
         return true;
     }
 
-    void StopServer(const ServerProcess& server) {
-        if (server.pid <= 0) { return; }
+    void StopServer(ServerProcess& server) {
+        if (server.pid <= 0 || !server.owned || !server.running) { return; }
 
         kill(server.pid, SIGTERM);
 
@@ -41,6 +43,8 @@ namespace process {
         kill(server.pid, SIGKILL);
         status = 0;
         waitpid(server.pid, &status, 0);
+
+        server.running = false;
     }
 
 } // namespace process
