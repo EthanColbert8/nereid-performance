@@ -7,7 +7,7 @@
 #include "utils/errors.h"
 
 #include <climits>
-#include <cstdio>
+// #include <cstdio>
 #include <cstdint>
 #include <cstring>
 #include <string>
@@ -146,7 +146,7 @@ namespace benchmark {
             const grpc::Status metadata_status = stub->ModelMetadata(&metadata_context, metadata_request, &metadata_response);
             if (!metadata_status.ok()) {
                 if (metadata_status.error_code() == grpc::StatusCode::NOT_FOUND) {
-                    std::fprintf(stderr, "[WARNING] Skipping model \"%s\" because it does not exist on the server\n", partial_model_spec.name);
+                    logger->warning("Skipping model \"%s\" because it does not exist on the server\n", partial_model_spec.name);
                     continue;
                 }
 

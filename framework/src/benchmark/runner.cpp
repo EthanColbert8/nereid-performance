@@ -1,7 +1,6 @@
 #include "benchmark/runner.h"
 #include "benchmark/context.h"
 #include "nereid/model.h"
-// #include "nereid/service.h"
 #include "analysis/stats.h"
 #include "utils/errors.h"
 
@@ -20,6 +19,7 @@
 #include <vector>
 #include <random>
 
+#include <nlohmann/json.hpp>
 #include <grpcpp/grpcpp.h>
 #include "grpc_service.grpc.pb.h"
 #include "grpc_service.pb.h"
@@ -164,8 +164,6 @@ namespace benchmark {
             return false;
         }
 
-        *report = nlohmann::json::object();
-
         // Create a single random number generator for whole benchmark run
         std::random_device rd;
         std::mt19937 generator(rd());
@@ -183,11 +181,36 @@ namespace benchmark {
             return false;
         }
 
-        nlohmann::json report_models = nlohmann::json::array();
-        nlohmann::json report_summary = nlohmann::json::array();
+        *report = nlohmann::json::object();
 
+        nlohmann::json config_json = nlohmann::json::object();
+        config_json["num_trials"] = ctx.num_trials;
+        config_json["server_address"] = ctx.server_address;
+
+        nlohmann::json model_names_json = nlohmann::json::array();
+        for (int i = 0; i < ctx.model_count; i++) {
+            model_names_json.push_back(ctx.model_specs[i].name);
+        }
+        config_json["model_names"] = model_names_json;
+
+        nlohmann::json server_json = nlohmann::json::object();
+        server_json["name"] = server_metadata_response.name();
+        server_json["version"] = server_metadata_response.version();
+        nlohmann::json extensions_json = nlohmann::json::array();
+        for (int i = 0; i < server_metadata_response.extensions_size(); i++) {
+            extensions_json.push_back(server_metadata_response.extensions(i));
+        }
+        server_json["extensions"] = extensions_json;
+
+        (*report)["config"] = config_json;
+        (*report)["server"] = server_json;
+
+        ctx.logger->info("Server metadata recorded. Beginning scans.");
+
+        nlohmann::json report_models = nlohmann::json::array();
         for (size_t i = 0; i < ctx.model_count; i++) {
             const nereid::ModelSpec& spec = ctx.model_specs[i];
+
             nlohmann::json model_json = nlohmann::json::object();
             model_json["name"] = spec.name;
             model_json["version"] = spec.version;
@@ -212,7 +235,14 @@ namespace benchmark {
                 outputs_json.push_back(tensor_json);
             }
             model_json["outputs"] = outputs_json;
-            report_models.push_back(model_json);
+
+            nlohmann::json model_batch_sizes = nlohmann::json::array();
+            nlohmann::json model_latency = nlohmann::json::array();
+            nlohmann::json model_latency_std = nlohmann::json::array();
+            nlohmann::json model_latency_stderr = nlohmann::json::array();
+            nlohmann::json model_throughput = nlohmann::json::array();
+            nlohmann::json model_throughput_std = nlohmann::json::array();
+            nlohmann::json model_throughput_stderr = nlohmann::json::array();
 
             for (int batch_index = 0; batch_index < ctx.batch_size_count; batch_index++) {
                 const int batch_size = ctx.batch_sizes[batch_index];
@@ -221,56 +251,32 @@ namespace benchmark {
                 analysis::RunningStatsInit(latency_stats);
                 analysis::RunningStatsInit(throughput_stats);
 
+                ctx.logger->info("Beginning scan for model \"%s\" with batch size %d", spec.name.c_str(), batch_size);
+
                 if (!RunBatchTrials(stub.get(), spec, rand_gen, ctx.num_trials, batch_size, &latency_stats, &throughput_stats, error_message)) {
                     return false;
                 }
 
-                nlohmann::json summary_row = nlohmann::json::object();
-                summary_row["model_name"] = spec.name;
-                summary_row["batch_size"] = batch_size;
-                summary_row["num_trials"] = ctx.num_trials;
-                summary_row["mean_latency_ms"] = analysis::RunningStatsMean(latency_stats);
-                summary_row["std_latency_ms"] = analysis::RunningStatsStdDev(latency_stats);
-                summary_row["stderr_latency_ms"] = analysis::RunningStatsStdErr(latency_stats);
-                summary_row["mean_throughput_infer_per_sec"] = analysis::RunningStatsMean(throughput_stats);
-                summary_row["std_throughput_infer_per_sec"] = analysis::RunningStatsStdDev(throughput_stats);
-                summary_row["stderr_throughput_infer_per_sec"] = analysis::RunningStatsStdErr(throughput_stats);
-                report_summary.push_back(summary_row);
+                model_batch_sizes.push_back(batch_size);
+                model_latency.push_back(analysis::RunningStatsMean(latency_stats));
+                model_latency_std.push_back(analysis::RunningStatsStdDev(latency_stats));
+                model_latency_stderr.push_back(analysis::RunningStatsStdErr(latency_stats));
+                model_throughput.push_back(analysis::RunningStatsMean(throughput_stats));
+                model_throughput_std.push_back(analysis::RunningStatsStdDev(throughput_stats));
+                model_throughput_stderr.push_back(analysis::RunningStatsStdErr(throughput_stats));
             }
+
+            model_json["batch_sizes"] = model_batch_sizes;
+            model_json["latency_ms"] = model_latency;
+            model_json["latency_ms_std"] = model_latency_std;
+            model_json["latency_ms_stderr"] = model_latency_stderr;
+            model_json["throughput_persec"] = model_throughput;
+            model_json["throughput_persec_std"] = model_throughput_std;
+            model_json["throughput_persec_stderr"] = model_throughput_stderr;
+            report_models.push_back(model_json);
         }
 
-        nlohmann::json config_json = nlohmann::json::object();
-        config_json["num_trials"] = ctx.num_trials;
-        // config_json["server_binary_path"] = ctx.server_binary_path;
-        config_json["server_address"] = ctx.server_address;
-        // config_json["output_path"] = ctx.output_path;
-
-        nlohmann::json batch_sizes_json = nlohmann::json::array();
-        for (int i = 0; i < ctx.batch_size_count; i++) {
-            batch_sizes_json.push_back(ctx.batch_sizes[i]);
-        }
-        config_json["batch_sizes"] = batch_sizes_json;
-
-        // nlohmann::json model_names_json = nlohmann::json::array();
-        // for (int i = 0; i < ctx.model_count; i++) {
-        //     model_names_json.push_back(ctx.model_names[i]);
-        // }
-        // config_json["model_names"] = model_names_json;
-
-        nlohmann::json server_json = nlohmann::json::object();
-        server_json["name"] = server_metadata_response.name();
-        server_json["version"] = server_metadata_response.version();
-        nlohmann::json extensions_json = nlohmann::json::array();
-        for (int i = 0; i < server_metadata_response.extensions_size(); i++) {
-            extensions_json.push_back(server_metadata_response.extensions(i));
-        }
-        server_json["extensions"] = extensions_json;
-
-        (*report)["config"] = config_json;
-        (*report)["server"] = server_json;
-        (*report)["models"] = report_models;
-        (*report)["summary"] = report_summary;
-
+        (*report)["summary"] = report_models;
         return true;
     }
 

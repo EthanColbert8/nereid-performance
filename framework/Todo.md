@@ -7,6 +7,7 @@
 [x] Create a context struct for the runner
 [x] Create an actual enum for data types, rather than using a string
 [x] Create a logging system
+[x] Reorganize JSON output - it's awful rn
 [ ] Get Nereid server logs sent to a file (currently it's `/dev/null`) when we own process
 [ ] Allow logging to files other than stderr
 [ ] Start thinking about benchmark configuration via YAML
