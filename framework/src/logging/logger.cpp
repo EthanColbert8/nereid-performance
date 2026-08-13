@@ -29,7 +29,7 @@ namespace logging {
         struct tm local_tm;
         localtime_r(&now_time_t, &local_tm);
 
-        size_t n = strftime(out, out_size, "%Y-%m-%d %H-%M-%S", &local_tm);
+        size_t n = strftime(out, out_size, "%Y-%m-%d %H:%M:%S", &local_tm);
         n += snprintf(out + n, out_size - n, ".%1lld", sec_fraction);
         return n;
     }

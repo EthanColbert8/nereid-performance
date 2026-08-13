@@ -7,5 +7,5 @@ module load cudnn/9.2.0.82-12
 export LD_LIBRARY_PATH="/depot/cms/users/colberte/SONIC/nereid/torch_lib/libtorch/lib:$LD_LIBRARY_PATH"
 
 # ./nereid-server
-./framework/build/nereid-bench
+./framework/build/nereid-bench --launch-server
 
