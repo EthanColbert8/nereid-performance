@@ -1,8 +1,10 @@
 #pragma once
 
-#include <string>
-#include <nlohmann/json.hpp>
 #include "benchmark/context.h"
+
+#include <string>
+
+#include <nlohmann/json.hpp>
 
 namespace benchmark {
 

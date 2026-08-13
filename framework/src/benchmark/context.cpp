@@ -1,58 +1,24 @@
 #include "benchmark/context.h"
 
-#include <grpcpp/grpcpp.h>
-#include <cerrno>
+#include "cli/args.h"
+#include "logging/logger.h"
+#include "nereid/model.h"
+#include "utils/address.h"
+#include "utils/errors.h"
+
 #include <climits>
-#include <cstdio>
 #include <cstdint>
-#include <cstdlib>
 #include <cstring>
 #include <string>
 #include <utility>
 #include <vector>
 #include <sys/types.h>
 
-#include "cli/args.h"
-#include "nereid/model.h"
-#include "nereid/service.h"
-#include "utils/errors.h"
-
+#include <grpcpp/grpcpp.h>
 #include "grpc_service.grpc.pb.h"
 #include "grpc_service.pb.h"
 
 namespace benchmark {
-
-    constexpr int STARTUP_TIMEOUT_SECONDS = 120;
-
-    bool BuildServerAddress(const char* server_address, const char* server_port, std::string* combined_address, std::string* error_message) {
-        if (server_address == nullptr || *server_address == '\0') {
-            utils::SetError(error_message, "server address is empty");
-            return false;
-        }
-
-        if (server_port == nullptr || *server_port == '\0') {
-            utils::SetError(error_message, "server port is empty");
-            return false;
-        }
-
-        errno = 0;
-        char* end = nullptr;
-        const long parsed_port = std::strtol(server_port, &end, 10);
-        if (errno != 0 || end == server_port || *end != '\0' || parsed_port <= 0 || parsed_port > 65535) {
-            utils::SetError(error_message, std::string("invalid server port: ") + server_port);
-            return false;
-        }
-
-        const int required_size = std::snprintf(nullptr, 0, "%s:%ld", server_address, parsed_port);
-        if (required_size < 0) {
-            utils::SetError(error_message, "failed to format server address");
-            return false;
-        }
-
-        combined_address->resize(static_cast<size_t>(required_size));
-        std::snprintf(&(*combined_address)[0], static_cast<size_t>(required_size) + 1, "%s:%ld", server_address, parsed_port);
-        return true;
-    }
 
     bool MergeInputShape(
         const cli::PartialModelSpec& partial_model_spec,
@@ -90,8 +56,11 @@ namespace benchmark {
             return false;
         }
 
+        nereid::TensorDtype dtype = nereid::StringToDtype(server_input.datatype(), error_message);
+        if (dtype == nereid::TensorDtype::INVALID) { return false; }
+
         merged_input->name = server_input.name();
-        merged_input->datatype = server_input.datatype();
+        merged_input->dtype = dtype;
         merged_input->shape.clear();
         merged_input->shape.reserve(static_cast<size_t>(cli_shape_count));
 
@@ -127,14 +96,14 @@ namespace benchmark {
         return true;
     }
 
-    bool BuildBenchmarkContext(const cli::Args& args, BenchmarkContext* context, pid_t server_pid, std::string* error_message) {
+    bool BuildBenchmarkContext(const cli::Args& args, BenchmarkContext* context, logging::Logger* logger, std::string* error_message) {
         if (context == nullptr) {
             utils::SetError(error_message, "benchmark context output pointer is null");
             return false;
         }
 
         static std::string combined_server_address;
-        if (!BuildServerAddress(args.server_address, args.server_port, &combined_server_address, error_message)) {
+        if (!utils::BuildAddress(args.server_address, args.server_port, &combined_server_address, error_message)) {
             return false;
         }
 
@@ -148,6 +117,7 @@ namespace benchmark {
             return false;
         }
 
+        context->logger = logger;
         context->server_address = combined_server_address.c_str();
         context->batch_sizes = args.batch_sizes;
         context->batch_size_count = args.batch_size_count;
@@ -155,11 +125,6 @@ namespace benchmark {
 
         auto channel = grpc::CreateChannel(context->server_address, grpc::InsecureChannelCredentials());
         auto stub = inference::GRPCInferenceService::NewStub(channel);
-
-        // NOTE (Ethan): Since this is the first time we get a stub, need to wait for server readiness here.
-        if (!nereid::WaitForServerReady(stub.get(), server_pid, STARTUP_TIMEOUT_SECONDS, error_message)) {
-            return false;
-        }
 
         static std::vector<nereid::ModelSpec> merged_model_specs;
         merged_model_specs.clear();
@@ -180,7 +145,7 @@ namespace benchmark {
             const grpc::Status metadata_status = stub->ModelMetadata(&metadata_context, metadata_request, &metadata_response);
             if (!metadata_status.ok()) {
                 if (metadata_status.error_code() == grpc::StatusCode::NOT_FOUND) {
-                    std::fprintf(stderr, "[WARNING] Skipping model \"%s\" because it does not exist on the server\n", partial_model_spec.name);
+                    logger->warning("Skipping model \"%s\" because it does not exist on the server", partial_model_spec.name);
                     continue;
                 }
 
@@ -228,7 +193,11 @@ namespace benchmark {
                 const auto& output = metadata_response.outputs(output_index);
                 nereid::TensorSpec merged_output = {};
                 merged_output.name = output.name();
-                merged_output.datatype = output.datatype();
+                
+                nereid::TensorDtype dtype = nereid::StringToDtype(output.datatype(), error_message);
+                if (dtype == nereid::TensorDtype::INVALID) { return false; }
+                merged_output.dtype = dtype;
+
                 merged_output.shape.reserve(static_cast<size_t>(output.shape_size()));
                 for (int shape_index = 0; shape_index < output.shape_size(); shape_index++) {
                     merged_output.shape.push_back(output.shape(shape_index));

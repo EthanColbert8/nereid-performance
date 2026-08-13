@@ -1,7 +1,6 @@
 #include "benchmark/runner.h"
 #include "benchmark/context.h"
 #include "nereid/model.h"
-#include "nereid/service.h"
 #include "analysis/stats.h"
 #include "utils/errors.h"
 
@@ -18,12 +17,31 @@
 #include <sys/wait.h>
 #include <unistd.h>
 #include <vector>
+#include <random>
 
+#include <nlohmann/json.hpp>
 #include <grpcpp/grpcpp.h>
 #include "grpc_service.grpc.pb.h"
 #include "grpc_service.pb.h"
 
 namespace benchmark {
+
+    struct request_tensor_buffer_f32 {
+        float* data;
+        size_t count;
+        // std::vector<int64_t> shape;
+    };
+
+    struct standard_normal_generator {
+        std::mt19937* generator;
+        std::normal_distribution<float> dist;
+    };
+
+    void FillRandomFloatsStandardNormal(request_tensor_buffer_f32 buffer, standard_normal_generator& rand_gen) {
+        for (size_t i = 0; i < buffer.count; i++) {
+            buffer.data[i] = rand_gen.dist(*(rand_gen.generator));
+        }
+    }
 
     bool ValidateInferResponse(const nereid::ModelSpec& spec, const inference::ModelInferResponse& response, int batch_size, std::string* error_message) {
         if (response.outputs_size() != static_cast<int>(spec.outputs.size())) {
@@ -50,6 +68,7 @@ namespace benchmark {
     bool RunBatchTrials(
         inference::GRPCInferenceService::Stub* stub,
         const nereid::ModelSpec& spec,
+        standard_normal_generator& rand_gen,
         int num_trials,
         int batch_size,
         analysis::RunningStats* latency_stats,
@@ -62,18 +81,26 @@ namespace benchmark {
             request.set_model_version(spec.version);
         }
 
+        // Pre-allocating all the input buffers
+        std::vector<request_tensor_buffer_f32> input_buffers;
+        input_buffers.reserve(spec.inputs.size());
+
         for (size_t i = 0; i < spec.inputs.size(); i++) {
             const nereid::TensorSpec& input_spec = spec.inputs[i];
             
             auto* input = request.add_inputs();
             input->set_name(input_spec.name);
-            input->set_datatype(input_spec.datatype);
-
-            // Add shape values to the input one at a time for some reason...
+            input->set_datatype(nereid::DtypeToString(input_spec.dtype));
+            
+            size_t element_count = batch_size;
             input->add_shape(batch_size);
             for (size_t j = 0; j < input_spec.shape.size(); j++) {
                 input->add_shape(input_spec.shape[j]);
+                element_count *= static_cast<size_t>(input_spec.shape[j]);
             }
+
+            float* buffer = new float[element_count];
+            input_buffers.push_back({buffer, element_count});
         }
 
         for (size_t i = 0; i < spec.outputs.size(); i++) {
@@ -90,30 +117,15 @@ namespace benchmark {
             // ClientContext is single-use for some reason...
             grpc::ClientContext infer_context;
 
-            std::vector<std::string> raw_input_buffers;
-            raw_input_buffers.reserve(spec.inputs.size());
-
-            for (size_t i = 0; i < spec.inputs.size(); i++) {
-                const nereid::TensorSpec& input_spec = spec.inputs[i];
-
-                size_t element_count = batch_size;
-                for (size_t j = 0; j < input_spec.shape.size(); j++) {
-                    element_count *= static_cast<size_t>(input_spec.shape[j]);
-                }
-                const size_t bytes_per_element = nereid::DatatypeSizeBytes(input_spec.datatype, error_message);
-                if (bytes_per_element == 0) {
-                    return false;
-                }
-
-                // TODO (Ethan): Actually use random numbers, not zeros.
-                std::string raw_contents(element_count * bytes_per_element, '\0');
-                raw_input_buffers.push_back(std::move(raw_contents));
+            for (size_t i = 0; i < input_buffers.size(); i++) {
+                FillRandomFloatsStandardNormal(input_buffers[i], rand_gen);
             }
 
             const auto start_time = std::chrono::steady_clock::now();
 
-            for (size_t i = 0; i < raw_input_buffers.size(); i++) {
-                request.add_raw_input_contents(raw_input_buffers[i]);
+            // Include input preparation for RPC call in the timing
+            for (size_t i = 0; i < input_buffers.size(); i++) {
+                request.add_raw_input_contents(input_buffers[i].data, input_buffers[i].count * sizeof(float));
             }
 
             grpc::Status infer_status = stub->ModelInfer(&infer_context, request, &response);
@@ -138,6 +150,11 @@ namespace benchmark {
             analysis::RunningStatsPush(*throughput_stats, throughput);
         }
 
+        // clean up the buffers we allocated
+        for (int i = 0; i < input_buffers.size(); i++) {
+            delete[] input_buffers[i].data;
+        }
+
         return true;
     }
 
@@ -147,7 +164,10 @@ namespace benchmark {
             return false;
         }
 
-        *report = nlohmann::json::object();
+        // Create a single random number generator for whole benchmark run
+        std::random_device rd;
+        std::mt19937 generator(rd());
+        standard_normal_generator rand_gen{&generator, std::normal_distribution<float>(0.0, 1.0)};
 
         auto channel = grpc::CreateChannel(ctx.server_address, grpc::InsecureChannelCredentials());
         auto stub = inference::GRPCInferenceService::NewStub(channel);
@@ -161,79 +181,17 @@ namespace benchmark {
             return false;
         }
 
-        nlohmann::json report_models = nlohmann::json::array();
-        nlohmann::json report_summary = nlohmann::json::array();
-
-        for (size_t i = 0; i < ctx.model_count; i++) {
-            const nereid::ModelSpec& spec = ctx.model_specs[i];
-            nlohmann::json model_json = nlohmann::json::object();
-            model_json["name"] = spec.name;
-            model_json["version"] = spec.version;
-            model_json["platform"] = spec.platform;
-
-            nlohmann::json inputs_json = nlohmann::json::array();
-            for (size_t j = 0; j < spec.inputs.size(); j++) {
-                nlohmann::json tensor_json = nlohmann::json::object();
-                tensor_json["name"] = spec.inputs[j].name;
-                tensor_json["datatype"] = spec.inputs[j].datatype;
-                tensor_json["shape"] = spec.inputs[j].shape;
-                inputs_json.push_back(tensor_json);
-            }
-            model_json["inputs"] = inputs_json;
-
-            nlohmann::json outputs_json = nlohmann::json::array();
-            for (size_t j = 0; j < spec.outputs.size(); j++) {
-                nlohmann::json tensor_json = nlohmann::json::object();
-                tensor_json["name"] = spec.outputs[j].name;
-                tensor_json["datatype"] = spec.outputs[j].datatype;
-                tensor_json["shape"] = spec.outputs[j].shape;
-                outputs_json.push_back(tensor_json);
-            }
-            model_json["outputs"] = outputs_json;
-            report_models.push_back(model_json);
-
-            for (int batch_index = 0; batch_index < ctx.batch_size_count; batch_index++) {
-                const int batch_size = ctx.batch_sizes[batch_index];
-                analysis::RunningStats latency_stats;
-                analysis::RunningStats throughput_stats;
-                analysis::RunningStatsInit(latency_stats);
-                analysis::RunningStatsInit(throughput_stats);
-
-                if (!RunBatchTrials(stub.get(), spec, ctx.num_trials, batch_size, &latency_stats, &throughput_stats, error_message)) {
-                    return false;
-                }
-
-                nlohmann::json summary_row = nlohmann::json::object();
-                summary_row["model_name"] = spec.name;
-                summary_row["batch_size"] = batch_size;
-                summary_row["num_trials"] = ctx.num_trials;
-                summary_row["mean_latency_ms"] = analysis::RunningStatsMean(latency_stats);
-                summary_row["std_latency_ms"] = analysis::RunningStatsStdDev(latency_stats);
-                summary_row["stderr_latency_ms"] = analysis::RunningStatsStdErr(latency_stats);
-                summary_row["mean_throughput_infer_per_sec"] = analysis::RunningStatsMean(throughput_stats);
-                summary_row["std_throughput_infer_per_sec"] = analysis::RunningStatsStdDev(throughput_stats);
-                summary_row["stderr_throughput_infer_per_sec"] = analysis::RunningStatsStdErr(throughput_stats);
-                report_summary.push_back(summary_row);
-            }
-        }
+        *report = nlohmann::json::object();
 
         nlohmann::json config_json = nlohmann::json::object();
         config_json["num_trials"] = ctx.num_trials;
-        // config_json["server_binary_path"] = ctx.server_binary_path;
         config_json["server_address"] = ctx.server_address;
-        // config_json["output_path"] = ctx.output_path;
 
-        nlohmann::json batch_sizes_json = nlohmann::json::array();
-        for (int i = 0; i < ctx.batch_size_count; i++) {
-            batch_sizes_json.push_back(ctx.batch_sizes[i]);
+        nlohmann::json model_names_json = nlohmann::json::array();
+        for (int i = 0; i < ctx.model_count; i++) {
+            model_names_json.push_back(ctx.model_specs[i].name);
         }
-        config_json["batch_sizes"] = batch_sizes_json;
-
-        // nlohmann::json model_names_json = nlohmann::json::array();
-        // for (int i = 0; i < ctx.model_count; i++) {
-        //     model_names_json.push_back(ctx.model_names[i]);
-        // }
-        // config_json["model_names"] = model_names_json;
+        config_json["model_names"] = model_names_json;
 
         nlohmann::json server_json = nlohmann::json::object();
         server_json["name"] = server_metadata_response.name();
@@ -246,9 +204,79 @@ namespace benchmark {
 
         (*report)["config"] = config_json;
         (*report)["server"] = server_json;
-        (*report)["models"] = report_models;
-        (*report)["summary"] = report_summary;
 
+        ctx.logger->info("Server metadata recorded. Beginning scans.");
+
+        nlohmann::json report_models = nlohmann::json::array();
+        for (size_t i = 0; i < ctx.model_count; i++) {
+            const nereid::ModelSpec& spec = ctx.model_specs[i];
+
+            nlohmann::json model_json = nlohmann::json::object();
+            model_json["name"] = spec.name;
+            model_json["version"] = spec.version;
+            model_json["platform"] = spec.platform;
+
+            nlohmann::json inputs_json = nlohmann::json::array();
+            for (size_t j = 0; j < spec.inputs.size(); j++) {
+                nlohmann::json tensor_json = nlohmann::json::object();
+                tensor_json["name"] = spec.inputs[j].name;
+                tensor_json["datatype"] = nereid::DtypeToString(spec.inputs[j].dtype);
+                tensor_json["shape"] = spec.inputs[j].shape;
+                inputs_json.push_back(tensor_json);
+            }
+            model_json["inputs"] = inputs_json;
+
+            nlohmann::json outputs_json = nlohmann::json::array();
+            for (size_t j = 0; j < spec.outputs.size(); j++) {
+                nlohmann::json tensor_json = nlohmann::json::object();
+                tensor_json["name"] = spec.outputs[j].name;
+                tensor_json["datatype"] = nereid::DtypeToString(spec.outputs[j].dtype);
+                tensor_json["shape"] = spec.outputs[j].shape;
+                outputs_json.push_back(tensor_json);
+            }
+            model_json["outputs"] = outputs_json;
+
+            nlohmann::json model_batch_sizes = nlohmann::json::array();
+            nlohmann::json model_latency = nlohmann::json::array();
+            nlohmann::json model_latency_std = nlohmann::json::array();
+            nlohmann::json model_latency_stderr = nlohmann::json::array();
+            nlohmann::json model_throughput = nlohmann::json::array();
+            nlohmann::json model_throughput_std = nlohmann::json::array();
+            nlohmann::json model_throughput_stderr = nlohmann::json::array();
+
+            for (int batch_index = 0; batch_index < ctx.batch_size_count; batch_index++) {
+                const int batch_size = ctx.batch_sizes[batch_index];
+                analysis::RunningStats latency_stats;
+                analysis::RunningStats throughput_stats;
+                analysis::RunningStatsInit(latency_stats);
+                analysis::RunningStatsInit(throughput_stats);
+
+                ctx.logger->info("Beginning scan for model \"%s\" with batch size %d", spec.name.c_str(), batch_size);
+
+                if (!RunBatchTrials(stub.get(), spec, rand_gen, ctx.num_trials, batch_size, &latency_stats, &throughput_stats, error_message)) {
+                    return false;
+                }
+
+                model_batch_sizes.push_back(batch_size);
+                model_latency.push_back(analysis::RunningStatsMean(latency_stats));
+                model_latency_std.push_back(analysis::RunningStatsStdDev(latency_stats));
+                model_latency_stderr.push_back(analysis::RunningStatsStdErr(latency_stats));
+                model_throughput.push_back(analysis::RunningStatsMean(throughput_stats));
+                model_throughput_std.push_back(analysis::RunningStatsStdDev(throughput_stats));
+                model_throughput_stderr.push_back(analysis::RunningStatsStdErr(throughput_stats));
+            }
+
+            model_json["batch_sizes"] = model_batch_sizes;
+            model_json["latency_ms"] = model_latency;
+            model_json["latency_ms_std"] = model_latency_std;
+            model_json["latency_ms_stderr"] = model_latency_stderr;
+            model_json["throughput_persec"] = model_throughput;
+            model_json["throughput_persec_std"] = model_throughput_std;
+            model_json["throughput_persec_stderr"] = model_throughput_stderr;
+            report_models.push_back(model_json);
+        }
+
+        (*report)["summary"] = report_models;
         return true;
     }
 
