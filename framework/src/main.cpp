@@ -1,4 +1,5 @@
 #include "cli/args.h"
+#include "logging/logger.h"
 #include "process/control.h"
 #include "nereid/service.h"
 #include "benchmark/context.h"
@@ -12,6 +13,7 @@
 #include <nlohmann/json.hpp>
 
 constexpr int STARTUP_TIMEOUT_SECONDS = 120;
+constexpr size_t LOG_BUFFER_SIZE_BYTES = 8192;
 
 bool WriteReport(const cli::Args& args, const nlohmann::json& report, std::string* error_message) {
     FILE* file = std::fopen(args.output_path, "w");
@@ -35,6 +37,8 @@ bool WriteReport(const cli::Args& args, const nlohmann::json& report, std::strin
 int main(int argc, char* argv[]) {
     cli::Args args = cli::ParseArgs(argc, argv);
 
+    logging::Logger logger(stderr, logging::INFO, LOG_BUFFER_SIZE_BYTES);
+
     std::string error_message;
     benchmark::BenchmarkContext ctx;
     nlohmann::json report;
@@ -45,42 +49,46 @@ int main(int argc, char* argv[]) {
     server.running = false;
 
     if (args.launch_server) {
+        logger.info("Launching server binary \"%s\"", args.server_binary_path);
         if (!process::LaunchServer(args.server_binary_path, &server, &error_message)) {
-            std::fprintf(stderr, "Error: %s\n", error_message.c_str());
+            logger.error("%s", error_message.c_str());
             return EXIT_FAILURE;
         }
         if (!nereid::WaitForServerReady(args.server_address, args.server_port, server.pid, STARTUP_TIMEOUT_SECONDS, &error_message)) {
-            std::fprintf(stderr, "Error: %s\n", error_message.c_str());
+            logger.error("%s", error_message.c_str());
             process::StopServer(server);
             return EXIT_FAILURE;
         }
     }
     else {
         if (!nereid::WaitForServerReady(args.server_address, args.server_port, STARTUP_TIMEOUT_SECONDS, &error_message)) {
-            std::fprintf(stderr, "Error: %s\n", error_message.c_str());
+            logger.error("%s", error_message.c_str());
             process::StopServer(server);
             return EXIT_FAILURE;
         }
     }
+    logger.info("Server found ready at address \"%s:%s\"", args.server_address, args.server_port);
 
-    if (!benchmark::BuildBenchmarkContext(args, &ctx, &error_message)) {
-        std::fprintf(stderr, "Error: %s\n", error_message.c_str());
+    if (!benchmark::BuildBenchmarkContext(args, &ctx, &logger, &error_message)) {
+        logger.error("%s", error_message.c_str());
         process::StopServer(server);
         return EXIT_FAILURE;
     }
 
+    logger.info("Beginning benchmark");
     if (!benchmark::RunBenchmark(ctx, &report, &error_message)) {
-        std::fprintf(stderr, "Error: %s\n", error_message.c_str());
+        logger.error("%s", error_message.c_str());
         process::StopServer(server);
         return EXIT_FAILURE;
     }
 
     if (!WriteReport(args, report, &error_message)) {
-        std::fprintf(stderr, "Error: %s\n", error_message.c_str());
+        logger.error("%s", error_message.c_str());
         process::StopServer(server);
         return EXIT_FAILURE;
     }
 
+    logger.info("Benchmark finshed. Report written to \"%s\"", args.output_path);
     process::StopServer(server);
     return EXIT_SUCCESS;
 }

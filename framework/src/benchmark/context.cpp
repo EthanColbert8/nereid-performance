@@ -1,16 +1,14 @@
 #include "benchmark/context.h"
 
 #include "cli/args.h"
+#include "logging/logger.h"
 #include "nereid/model.h"
-// #include "nereid/service.h"
 #include "utils/address.h"
 #include "utils/errors.h"
 
-// #include <cerrno>
 #include <climits>
 #include <cstdio>
 #include <cstdint>
-// #include <cstdlib>
 #include <cstring>
 #include <string>
 #include <utility>
@@ -99,7 +97,7 @@ namespace benchmark {
         return true;
     }
 
-    bool BuildBenchmarkContext(const cli::Args& args, BenchmarkContext* context, std::string* error_message) {
+    bool BuildBenchmarkContext(const cli::Args& args, BenchmarkContext* context, logging::Logger* logger, std::string* error_message) {
         if (context == nullptr) {
             utils::SetError(error_message, "benchmark context output pointer is null");
             return false;
@@ -120,6 +118,7 @@ namespace benchmark {
             return false;
         }
 
+        context->logger = logger;
         context->server_address = combined_server_address.c_str();
         context->batch_sizes = args.batch_sizes;
         context->batch_size_count = args.batch_size_count;
