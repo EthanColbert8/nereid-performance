@@ -71,13 +71,13 @@ namespace logging {
 
         pos += snprintf(line + pos, sizeof(line) - pos, " - %s]: ", LevelToString(level));
 
-        int n = vsnprintf(line, sizeof(line), format, args);
+        int n = vsnprintf(line + pos, sizeof(line) - pos, format, args);
         if (n < 0) { return; }
+        pos += static_cast<size_t>(n);
 
-        size_t len = static_cast<size_t>(n);
-        if (len >= sizeof(line)) { len = sizeof(line) - 1; }
+        if (pos >= sizeof(line)) { pos = sizeof(line) - 1; }
 
-        write(line, len);
+        write(line, pos);
         write("\n", 1);
     }
 

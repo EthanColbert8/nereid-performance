@@ -2,9 +2,10 @@
 #include "utils/errors.h"
 
 #include <string>
+#include <unistd.h>
+#include <fcntl.h>
 #include <sys/types.h>
 #include <sys/wait.h>
-#include <unistd.h>
 
 namespace process {
 
@@ -16,6 +17,14 @@ namespace process {
         }
 
         if (pid == 0) {
+            // TODO (Ethan): Redirect server logs to a configurable file instead of /dev/null
+            int dev_null = open("/dev/null", O_WRONLY);
+            if (dev_null >= 0) {
+                dup2(dev_null, STDOUT_FILENO);
+                dup2(dev_null, STDERR_FILENO);
+                close(dev_null);
+            }
+
             execl(binary_path, binary_path, static_cast<char*>(nullptr));
             _exit(127);
         }
