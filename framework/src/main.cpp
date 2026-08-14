@@ -90,6 +90,8 @@ int main(int argc, char* argv[]) {
         hardware_metrics_context.interval = std::chrono::milliseconds(250); // TODO (Ethan): make this configurable
         hardware_metrics_context.server_pid = server.pid;
 
+        logger.info("Collecting hardware metrics for server process (PID %d)", server.pid);
+
         hardware_metrics_thread = std::thread(
             process::ScrapeHardwareMetrics,
             std::ref(stop_hardware_metrics),
@@ -114,6 +116,9 @@ int main(int argc, char* argv[]) {
         nlohmann::json hardware_metrics_report = process::GenerateHardwareMetricsReport(hardware_metrics, logger);
         if (!WriteReport(args.hardware_metrics_output_path, hardware_metrics_report, &error_message)) {
             logger.error("%s", error_message.c_str());
+        }
+        else {
+            logger.info("Hardware metrics report written to \"%s\"", args.hardware_metrics_output_path);
         }
     }
 
