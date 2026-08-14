@@ -1,6 +1,7 @@
 #pragma once
 
 #include "benchmark/context.h"
+#include "logging/logger.h"
 
 #include <string>
 
@@ -8,6 +9,6 @@
 
 namespace benchmark {
 
-    bool RunBenchmark(const BenchmarkContext& ctx, nlohmann::json* report, std::string* error_message);
+    bool RunSingleClientBenchmark(const BenchmarkContext& ctx, nlohmann::json* report, logging::Logger& logger);
 
 } // namespace benchmark

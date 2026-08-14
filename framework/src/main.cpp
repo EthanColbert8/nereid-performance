@@ -5,7 +5,6 @@
 #include "nereid/service.h"
 #include "benchmark/context.h"
 #include "benchmark/runner.h"
-#include "utils/errors.h"
 
 #include <atomic>
 #include <thread>
@@ -18,10 +17,10 @@
 constexpr int STARTUP_TIMEOUT_SECONDS = 120;
 constexpr size_t LOG_BUFFER_SIZE_BYTES = 8192;
 
-bool WriteReport(const char* path, const nlohmann::json& report, std::string* error_message) {
+bool WriteReport(const char* path, const nlohmann::json& report, logging::Logger& logger) {
     FILE* file = std::fopen(path, "w");
     if (file == nullptr) {
-        utils::SetError(error_message, std::string("failed to open output file: ") + path);
+        logger.error("failed to open output file: %s", path);
         return false;
     }
 
@@ -30,7 +29,7 @@ bool WriteReport(const char* path, const nlohmann::json& report, std::string* er
     std::fclose(file);
 
     if (written != serialized.size()) {
-        utils::SetError(error_message, std::string("failed to write output file: ") + path);
+        logger.error("failed to write output file: %s", path);
         return false;
     }
 
@@ -39,10 +38,8 @@ bool WriteReport(const char* path, const nlohmann::json& report, std::string* er
 
 int main(int argc, char* argv[]) {
     cli::Args args = cli::ParseArgs(argc, argv);
-
     logging::Logger logger(stderr, logging::INFO, LOG_BUFFER_SIZE_BYTES);
 
-    std::string error_message;
     benchmark::BenchmarkContext ctx;
     nlohmann::json report;
 
@@ -60,28 +57,24 @@ int main(int argc, char* argv[]) {
 
     if (args.launch_server) {
         logger.info("Launching server binary \"%s\"", args.server_binary_path);
-        if (!process::LaunchServer(args.server_binary_path, &server, &error_message)) {
-            logger.error("%s", error_message.c_str());
+        if (!process::LaunchServer(args.server_binary_path, server, logger)) {
             return EXIT_FAILURE;
         }
-        if (!nereid::WaitForServerReady(args.server_address, args.server_port, server.pid, STARTUP_TIMEOUT_SECONDS, &error_message)) {
-            logger.error("%s", error_message.c_str());
-            process::StopServer(server);
+        if (!nereid::WaitForServerReady(args.server_address, args.server_port, server.pid, STARTUP_TIMEOUT_SECONDS, logger)) {
+            process::StopServer(server, logger);
             return EXIT_FAILURE;
         }
     }
     else {
-        if (!nereid::WaitForServerReady(args.server_address, args.server_port, STARTUP_TIMEOUT_SECONDS, &error_message)) {
-            logger.error("%s", error_message.c_str());
-            process::StopServer(server);
+        if (!nereid::WaitForServerReady(args.server_address, args.server_port, STARTUP_TIMEOUT_SECONDS, logger)) {
+            process::StopServer(server, logger);
             return EXIT_FAILURE;
         }
     }
-    logger.info("Server found ready at address \"%s:%s\"", args.server_address, args.server_port);
+    logger.info("Server found ready at address \"%s:%d\"", args.server_address, args.server_port);
 
-    if (!benchmark::BuildBenchmarkContext(args, &ctx, &logger, &error_message)) {
-        logger.error("%s", error_message.c_str());
-        process::StopServer(server);
+    if (!benchmark::BuildBenchmarkContext(args, &ctx, logger)) {
+        process::StopServer(server, logger);
         return EXIT_FAILURE;
     }
 
@@ -102,9 +95,8 @@ int main(int argc, char* argv[]) {
     }
 
     logger.info("Beginning benchmark");
-    if (!benchmark::RunBenchmark(ctx, &report, &error_message)) {
-        logger.error("%s", error_message.c_str());
-        process::StopServer(server);
+    if (!benchmark::RunSingleClientBenchmark(ctx, &report, logger)) {
+        process::StopServer(server, logger);
         return EXIT_FAILURE;
     }
 
@@ -114,21 +106,17 @@ int main(int argc, char* argv[]) {
         hardware_metrics_running = false;
 
         nlohmann::json hardware_metrics_report = process::GenerateHardwareMetricsReport(hardware_metrics, logger);
-        if (!WriteReport(args.hardware_metrics_output_path, hardware_metrics_report, &error_message)) {
-            logger.error("%s", error_message.c_str());
-        }
-        else {
+        if (WriteReport(args.hardware_metrics_output_path, hardware_metrics_report, logger)) {
             logger.info("Hardware metrics report written to \"%s\"", args.hardware_metrics_output_path);
         }
     }
 
-    if (!WriteReport(args.output_path, report, &error_message)) {
-        logger.error("%s", error_message.c_str());
-        process::StopServer(server);
+    if (!WriteReport(args.output_path, report, logger)) {
+        process::StopServer(server, logger);
         return EXIT_FAILURE;
     }
 
     logger.info("Benchmark finshed. Report written to \"%s\"", args.output_path);
-    process::StopServer(server);
+    process::StopServer(server, logger);
     return EXIT_SUCCESS;
 }

@@ -1,5 +1,7 @@
 #pragma once
 
+#include "logging/logger.h"
+
 #include <string>
 #include <sys/types.h>
 
@@ -11,7 +13,7 @@ namespace process {
         bool running;
     };
 
-    bool LaunchServer(const char* binary_path, ServerProcess* server, std::string* error_message);
-    void StopServer(ServerProcess& server);
+    bool LaunchServer(const char* binary_path, ServerProcess& server, logging::Logger& logger);
+    void StopServer(ServerProcess& server, logging::Logger& logger);
 
 } // namespace process

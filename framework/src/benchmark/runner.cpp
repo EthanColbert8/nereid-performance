@@ -2,7 +2,7 @@
 #include "benchmark/context.h"
 #include "nereid/model.h"
 #include "analysis/stats.h"
-#include "utils/errors.h"
+#include "logging/logger.h"
 
 #include <chrono>
 #include <cmath>
@@ -43,21 +43,24 @@ namespace benchmark {
         }
     }
 
-    bool ValidateInferResponse(const nereid::ModelSpec& spec, const inference::ModelInferResponse& response, int batch_size, std::string* error_message) {
+    bool ValidateInferResponse(const nereid::ModelSpec& spec, const inference::ModelInferResponse& response, int batch_size, logging::Logger& logger) {
         if (response.outputs_size() != static_cast<int>(spec.outputs.size())) {
-            utils::SetError(error_message, std::string("unexpected output count for model: ") + spec.name);
+            logger.error("unexpected output count for model \"%s\": expected %zu, got %d", spec.name.c_str(), spec.outputs.size(), response.outputs_size());
             return false;
         }
 
         for (int i = 0; i < response.outputs_size(); i++) {
             const auto& output = response.outputs(i);
             if (output.name() != spec.outputs[i].name) {
-                utils::SetError(error_message, std::string("unexpected output tensor name for model: ") + spec.name);
+                logger.error(
+                    "unexpected output tensor name for model \"%s\": expected \"%s\", got \"%s\"",
+                    spec.name.c_str(), spec.outputs[i].name.c_str(), output.name().c_str()
+                );
                 return false;
             }
 
             if (output.shape_size() > 0 && output.shape(0) != batch_size) {
-                utils::SetError(error_message, std::string("unexpected output batch dimension for model: ") + spec.name);
+                logger.error("unexpected output batch dimension for model \"%s\": expected %d, got %d", spec.name.c_str(), batch_size, output.shape(0));
                 return false;
             }
         }
@@ -73,7 +76,7 @@ namespace benchmark {
         int batch_size,
         analysis::RunningStats* latency_stats,
         analysis::RunningStats* throughput_stats,
-        std::string* error_message
+        logging::Logger& logger
     ) {
         inference::ModelInferRequest request;
         request.set_model_name(spec.name);
@@ -131,17 +134,16 @@ namespace benchmark {
             grpc::Status infer_status = stub->ModelInfer(&infer_context, request, &response);
 
             if (!infer_status.ok()) {
-                char error_buf[400];
-                std::snprintf(error_buf, sizeof(error_buf), "inference failed for model \"%s\". Error code: %d, message: %s", spec.name.c_str(), infer_status.error_code(), infer_status.error_message().c_str());
-                utils::SetError(error_message, error_buf);
+                logger.error(
+                    "inference failed for model \"%s\". Error code: %d, message: %s",
+                    spec.name.c_str(), infer_status.error_code(), infer_status.error_message().c_str()
+                );
                 return false;
             }
 
             const auto end_time = std::chrono::steady_clock::now();
 
-            if (!ValidateInferResponse(spec, response, batch_size, error_message)) {
-                return false;
-            }
+            if (!ValidateInferResponse(spec, response, batch_size, logger)) { return false; }
 
             double latency_ms = std::chrono::duration<double, std::milli>(end_time - start_time).count();
             double throughput = static_cast<double>(batch_size) / (latency_ms / 1000.0);
@@ -158,9 +160,9 @@ namespace benchmark {
         return true;
     }
 
-    bool RunBenchmark(const BenchmarkContext& ctx, nlohmann::json* report, std::string* error_message) {
+    bool RunSingleClientBenchmark(const BenchmarkContext& ctx, nlohmann::json* report, logging::Logger& logger) {
         if (report == nullptr) {
-            utils::SetError(error_message, "report output pointer is null");
+            logger.error("report output pointer is null");
             return false;
         }
 
@@ -177,7 +179,7 @@ namespace benchmark {
         inference::ServerMetadataResponse server_metadata_response;
         grpc::Status server_metadata_status = stub->ServerMetadata(&server_metadata_context, server_metadata_request, &server_metadata_response);
         if (!server_metadata_status.ok()) {
-            utils::SetError(error_message, "failed to fetch server metadata");
+            logger.error("failed to fetch server metadata: %s", server_metadata_status.error_message().c_str());
             return false;
         }
 
@@ -205,7 +207,7 @@ namespace benchmark {
         (*report)["config"] = config_json;
         (*report)["server"] = server_json;
 
-        ctx.logger->info("Server metadata recorded. Beginning scans.");
+        logger.info("Server metadata recorded. Beginning scans.");
 
         nlohmann::json report_models = nlohmann::json::array();
         for (size_t i = 0; i < ctx.model_count; i++) {
@@ -251,9 +253,9 @@ namespace benchmark {
                 analysis::RunningStatsInit(latency_stats);
                 analysis::RunningStatsInit(throughput_stats);
 
-                ctx.logger->info("Beginning scan for model \"%s\" with batch size %d", spec.name.c_str(), batch_size);
+                logger.info("Beginning scan for model \"%s\" with batch size %d", spec.name.c_str(), batch_size);
 
-                if (!RunBatchTrials(stub.get(), spec, rand_gen, ctx.num_trials, batch_size, &latency_stats, &throughput_stats, error_message)) {
+                if (!RunBatchTrials(stub.get(), spec, rand_gen, ctx.num_trials, batch_size, &latency_stats, &throughput_stats, logger)) {
                     return false;
                 }
 

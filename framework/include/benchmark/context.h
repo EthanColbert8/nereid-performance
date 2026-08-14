@@ -10,7 +10,6 @@
 namespace benchmark {
 
     struct BenchmarkContext {
-        logging::Logger* logger;
         const char* server_address; // already put together with port
         const nereid::ModelSpec* model_specs;
         int model_count;
@@ -19,6 +18,6 @@ namespace benchmark {
         int num_trials;
     };
 
-    bool BuildBenchmarkContext(const cli::Args& args, BenchmarkContext* context, logging::Logger* logger, std::string* error_message);
+    bool BuildBenchmarkContext(const cli::Args& args, BenchmarkContext* context, logging::Logger& logger);
 
 } // namespace benchmark

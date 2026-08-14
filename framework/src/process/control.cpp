@@ -1,5 +1,5 @@
 #include "process/control.h"
-#include "utils/errors.h"
+#include "logging/logger.h"
 
 #include <string>
 #include <unistd.h>
@@ -9,10 +9,10 @@
 
 namespace process {
 
-    bool LaunchServer(const char* binary_path, ServerProcess* server, std::string* error_message) {
+    bool LaunchServer(const char* binary_path, ServerProcess& server, logging::Logger& logger) {
         pid_t pid = fork();
         if (pid < 0) {
-            utils::SetError(error_message, "failed to fork server process");
+            logger.error("failed to fork server process");
             return false;
         }
 
@@ -29,13 +29,13 @@ namespace process {
             _exit(127);
         }
 
-        server->pid = pid;
-        server->owned = true;
-        server->running = true;
+        server.pid = pid;
+        server.owned = true;
+        server.running = true;
         return true;
     }
 
-    void StopServer(ServerProcess& server) {
+    void StopServer(ServerProcess& server, logging::Logger& logger) {
         if (server.pid <= 0 || !server.owned || !server.running) { return; }
 
         kill(server.pid, SIGTERM);
@@ -48,6 +48,8 @@ namespace process {
 
             usleep(100000);
         }
+
+        logger.warning("Server process (PID %d) did not exit after SIGTERM, sending SIGKILL", server.pid);
 
         kill(server.pid, SIGKILL);
         status = 0;
