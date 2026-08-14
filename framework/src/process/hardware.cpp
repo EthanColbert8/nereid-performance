@@ -1,14 +1,18 @@
 #include "process/hardware.h"
 #include "process/cpumetrics.h"
+#include "logging/logger.h"
 
 #include <thread>
 #include <atomic>
 #include <chrono>
+#include <ctime>
 #include <vector>
+
+#include <nlohmann/json.hpp>
 
 namespace process {
 
-    HardwareMetrics ScrapeHardwareMetrics(std::atomic_bool& stop, const HardwareMetricsContext& context, HardwareMetrics& metrics) {
+    void ScrapeHardwareMetrics(std::atomic_bool& stop, const HardwareMetricsContext& context, HardwareMetrics& metrics) {
         // metrics.gpu_util.reserve(1000);
         // metrics.gpu_mem.reserve(1000);
         metrics.cpu_util.reserve(1000);
@@ -39,8 +43,39 @@ namespace process {
 
             std::this_thread::sleep_until(next_tick);
         }
+    }
 
-        return metrics;
+    nlohmann::json GenerateHardwareMetricsReport(const HardwareMetrics& metrics, logging::Logger& logger) {
+        time_t start_time_t = std::chrono::system_clock::to_time_t(metrics.wall_start);
+
+        auto start_ms_since_epoch = std::chrono::duration_cast<std::chrono::milliseconds>(metrics.wall_start.time_since_epoch()).count();
+        auto start_sec_fraction = (start_ms_since_epoch % 1000) / 100; // tenths of a second
+
+        struct tm local_tm;
+        localtime_r(&start_time_t, &local_tm);
+
+        char start_time_str[32];
+        size_t n = strftime(start_time_str, sizeof(start_time_str), "%Y-%m-%d %H:%M:%S", &local_tm);
+        n += snprintf(start_time_str + n, sizeof(start_time_str) - n, ".%1lld", start_sec_fraction);
+        
+        if (n >= sizeof(start_time_str)) {
+            logger.warning("Start time string truncated somehow");
+        }
+
+        bool cpu_util_ok = metrics.cpu_util.size() == metrics.count;
+        bool ram_mb_ok = metrics.ram_mb.size() == metrics.count;
+        bool elapsed_sec_ok = metrics.elapsed_sec.size() == metrics.count;
+        if (!(cpu_util_ok && ram_mb_ok && elapsed_sec_ok)) {
+            logger.error("Metrics data corrupted! Size mismatch: cpu_util=%zu, ram_mb=%zu, elapsed_sec=%zu, recorded count=%d",
+                         metrics.cpu_util.size(), metrics.ram_mb.size(), metrics.elapsed_sec.size(), metrics.count);
+        }
+
+        nlohmann::json report = nlohmann::json::object();
+        report["cpu_util"] = metrics.cpu_util;
+        report["ram_mb"] = metrics.ram_mb;
+        report["elapsed_sec"] = metrics.elapsed_sec;
+        report["start_time"] = std::string(start_time_str);
+        return report;
     }
 
 } // namespace process

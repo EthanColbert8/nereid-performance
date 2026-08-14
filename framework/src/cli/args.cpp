@@ -13,6 +13,7 @@ namespace cli {
     constexpr const char* const DEFAULT_SERVER_ADDRESS = "localhost";
     constexpr const char* const DEFAULT_SERVER_PORT = "50051";
     constexpr const char* const DEFAULT_OUTPUT_PATH = "nereid_benchmark_summary.json";
+    constexpr const char* const DEFAULT_HARDWARE_METRICS_OUTPUT_PATH = "nereid_hardware_util.json";
 
     static int64_t default_pf_points[] = {2, 100};
     static int64_t default_pf_features[] = {20, 100};
@@ -116,6 +117,7 @@ Options:
         args.server_address = DEFAULT_SERVER_ADDRESS;
         args.server_port = DEFAULT_SERVER_PORT;
         args.output_path = DEFAULT_OUTPUT_PATH;
+        args.hardware_metrics_output_path = DEFAULT_HARDWARE_METRICS_OUTPUT_PATH;
         args.model_specs = DEFAULT_MODEL_SPECS;
         args.model_count = 2;
         args.batch_sizes = DEFAULT_BATCH_SIZES;

@@ -1,9 +1,13 @@
 #pragma once
 
+#include "logging/logger.h"
+
 #include <atomic>
 #include <chrono>
 #include <vector>
 #include <sys/types.h>
+
+#include <nlohmann/json.hpp>
 
 namespace process {
 
@@ -24,6 +28,8 @@ namespace process {
         pid_t server_pid;
     };
 
-    HardwareMetrics ScrapeHardwareMetrics(std::atomic_bool& stop, const HardwareMetricsContext& context, HardwareMetrics& metrics);
+    void ScrapeHardwareMetrics(std::atomic_bool& stop, const HardwareMetricsContext& context, HardwareMetrics& metrics);
+
+    nlohmann::json GenerateHardwareMetricsReport(const HardwareMetrics& metrics, logging::Logger& logger);
 
 } // namespace process

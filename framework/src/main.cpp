@@ -18,10 +18,10 @@
 constexpr int STARTUP_TIMEOUT_SECONDS = 120;
 constexpr size_t LOG_BUFFER_SIZE_BYTES = 8192;
 
-bool WriteReport(const cli::Args& args, const nlohmann::json& report, std::string* error_message) {
-    FILE* file = std::fopen(args.output_path, "w");
+bool WriteReport(const char* path, const nlohmann::json& report, std::string* error_message) {
+    FILE* file = std::fopen(path, "w");
     if (file == nullptr) {
-        utils::SetError(error_message, std::string("failed to open output file: ") + args.output_path);
+        utils::SetError(error_message, std::string("failed to open output file: ") + path);
         return false;
     }
 
@@ -30,7 +30,7 @@ bool WriteReport(const cli::Args& args, const nlohmann::json& report, std::strin
     std::fclose(file);
 
     if (written != serialized.size()) {
-        utils::SetError(error_message, std::string("failed to write output file: ") + args.output_path);
+        utils::SetError(error_message, std::string("failed to write output file: ") + path);
         return false;
     }
 
@@ -111,10 +111,13 @@ int main(int argc, char* argv[]) {
         hardware_metrics_thread.join();
         hardware_metrics_running = false;
 
-        logger.info("Hardware metrics collected, got %d samples", hardware_metrics.count);
+        nlohmann::json hardware_metrics_report = process::GenerateHardwareMetricsReport(hardware_metrics, logger);
+        if (!WriteReport(args.hardware_metrics_output_path, hardware_metrics_report, &error_message)) {
+            logger.error("%s", error_message.c_str());
+        }
     }
 
-    if (!WriteReport(args, report, &error_message)) {
+    if (!WriteReport(args.output_path, report, &error_message)) {
         logger.error("%s", error_message.c_str());
         process::StopServer(server);
         return EXIT_FAILURE;
