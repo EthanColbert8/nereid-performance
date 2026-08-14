@@ -9,12 +9,6 @@
 
 namespace cli {
 
-    constexpr const char* const DEFAULT_SERVER_BINARY_PATH = "./nereid-server";
-    constexpr const char* const DEFAULT_SERVER_ADDRESS = "localhost";
-    constexpr const char* const DEFAULT_SERVER_PORT = "50051";
-    constexpr const char* const DEFAULT_OUTPUT_PATH = "nereid_benchmark_summary.json";
-    constexpr const char* const DEFAULT_HARDWARE_METRICS_OUTPUT_PATH = "nereid_hardware_util.json";
-
     static int64_t default_pf_points[] = {2, 100};
     static int64_t default_pf_features[] = {20, 100};
     static int64_t default_pf_mask[] = {1, 100};
@@ -47,14 +41,30 @@ namespace cli {
         4, 8, 16, 32, 64, 128 //, 256, 512, 1024, 2048,
     };
 
+    constexpr Args DEFAULT_ARGS = {
+        num_trials: 100,
+        server_binary_path: "./nereid-server",
+        server_address: "localhost",
+        server_port: 50051,
+        output_path: "nereid_benchmark_summary.json",
+        hardware_metrics_output_path: "nereid_hardware_util.json",
+        model_specs: DEFAULT_MODEL_SPECS,
+        model_count: static_cast<int>(sizeof(DEFAULT_MODEL_SPECS) / sizeof(DEFAULT_MODEL_SPECS[0])),
+        batch_sizes: DEFAULT_BATCH_SIZES,
+        batch_size_count: static_cast<int>(sizeof(DEFAULT_BATCH_SIZES) / sizeof(DEFAULT_BATCH_SIZES[0])),
+        launch_server: false
+    };
+
     constexpr const char* const USAGE_MESSAGE = R"(Usage: nereid-bench [options]
 
 Options:
-    -n, --num-trials <positive int>: Number of trials to run (default 100)
-        --server-binary <path>: Path to the Nereid server binary (default ./nereid-server)
-        --server-address <host:port>: gRPC address for the server (default localhost:50051)
-        --output <path>: Summary JSON output path (default nereid_benchmark_summary.json)
-        --launch-server: Launch a server process (default false)
+    -n, --num-trials <positive int>: Number of trials per step in benchmark (default: 100)
+        --server-binary <path>: Path to the Nereid server binary (default: ./nereid-server)
+        --address <host>: gRPC address for the server (default: localhost)
+        --port <port>: gRPC port for the server (default: 50051)
+    -o, --out <path>: Summary JSON output path (default: nereid_benchmark_summary.json)
+        --hw-out <path>: Hardware metrics JSON output path (default: nereid_hardware_util.json)
+        --launch-server: Launch a server process to benchmark
 )";
 
     [[noreturn]] void PrintUsageAndExit(int exit_code, const char* message = nullptr) {
@@ -66,37 +76,18 @@ Options:
     }
 
     bool ValidateArgs(const Args& args) {
-        if (args.num_trials <= 0) {
-            return false;
-        }
-
-        if (args.server_binary_path == nullptr || *args.server_binary_path == '\0') {
-            return false;
-        }
-
-        if (args.server_address == nullptr || *args.server_address == '\0') {
-            return false;
-        }
-
-        if (args.output_path == nullptr || *args.output_path == '\0') {
-            return false;
-        }
-
-        if (args.model_specs == nullptr || args.model_count <= 0) {
-            return false;
-        }
-
-        if (args.batch_sizes == nullptr || args.batch_size_count <= 0) {
-            return false;
-        }
-
-        return true;
+        return (
+            args.num_trials > 0 &&
+            args.server_binary_path != nullptr && *args.server_binary_path != '\0' &&
+            args.server_address != nullptr && *args.server_address != '\0' &&
+            args.output_path != nullptr && *args.output_path != '\0' &&
+            args.model_specs != nullptr && args.model_count > 0 &&
+            args.batch_sizes != nullptr && args.batch_size_count > 0
+        );
     }
 
     bool ParsePositiveInt(const char* text, int& value) {
-        if (text == nullptr || *text == '\0') {
-            return false;
-        }
+        if (text == nullptr || *text == '\0') { return false; }
 
         errno = 0;
         char* end = nullptr;
@@ -110,23 +101,14 @@ Options:
     }
 
     Args ParseArgs(int argc, char* argv[]) {
-        Args args = {};
-        args.num_trials = 100;
-        args.server_binary_path = DEFAULT_SERVER_BINARY_PATH;
-        args.launch_server = false;
-        args.server_address = DEFAULT_SERVER_ADDRESS;
-        args.server_port = DEFAULT_SERVER_PORT;
-        args.output_path = DEFAULT_OUTPUT_PATH;
-        args.hardware_metrics_output_path = DEFAULT_HARDWARE_METRICS_OUTPUT_PATH;
-        args.model_specs = DEFAULT_MODEL_SPECS;
-        args.model_count = 2;
-        args.batch_sizes = DEFAULT_BATCH_SIZES;
-        args.batch_size_count = static_cast<int>(sizeof(DEFAULT_BATCH_SIZES) / sizeof(DEFAULT_BATCH_SIZES[0]));
+        Args args = DEFAULT_ARGS;
 
         bool saw_num_trials = false;
         bool saw_server_binary = false;
-        bool saw_server_address = false;
-        bool saw_output = false;
+        bool saw_address = false;
+        bool saw_port = false;
+        bool saw_out = false;
+        bool saw_hw_out = false;
 
         for (int i = 1; i < argc; i++) {
             if (std::strcmp(argv[i], "--help") == 0 || std::strcmp(argv[i], "-h") == 0) {
@@ -143,7 +125,7 @@ Options:
                     PrintUsageAndExit(EXIT_FAILURE, "Error: num-trials may only be passed once");
                 }
                 if (i + 1 >= argc) {
-                    PrintUsageAndExit(EXIT_FAILURE, "Error: --num-trials requires a positive integer argument");
+                    PrintUsageAndExit(EXIT_FAILURE, "Error: num-trials requires a positive integer argument");
                 }
                 if (!ParsePositiveInt(argv[i + 1], args.num_trials)) {
                     args.num_trials = 0;
@@ -168,30 +150,62 @@ Options:
                 continue;
             }
 
-            if (std::strcmp(argv[i], "--server-address") == 0) {
-                if (saw_server_address) {
-                    PrintUsageAndExit(EXIT_FAILURE, "Error: server-address may only be passed once");
+            if (std::strcmp(argv[i], "--address") == 0) {
+                if (saw_address) {
+                    PrintUsageAndExit(EXIT_FAILURE, "Error: address may only be passed once");
                 }
                 if (i + 1 >= argc) {
-                    PrintUsageAndExit(EXIT_FAILURE, "Error: --server-address requires an address argument");
+                    PrintUsageAndExit(EXIT_FAILURE, "Error: address requires an address argument");
                 }
 
                 args.server_address = argv[i + 1];
-                saw_server_address = true;
+                saw_address = true;
                 i++;
                 continue;
             }
 
-            if (std::strcmp(argv[i], "--output") == 0) {
-                if (saw_output) {
-                    PrintUsageAndExit(EXIT_FAILURE, "Error: output may only be passed once");
+            if (std::strcmp(argv[i], "--port") == 0) {
+                if (saw_port) {
+                    PrintUsageAndExit(EXIT_FAILURE, "Error: port may only be passed once");
                 }
                 if (i + 1 >= argc) {
-                    PrintUsageAndExit(EXIT_FAILURE, "Error: --output requires a path argument");
+                    PrintUsageAndExit(EXIT_FAILURE, "Error: port requires a positive integer argument");
+                }
+                if (!ParsePositiveInt(argv[i + 1], args.server_port)) {
+                    args.server_port = -1;
+                }
+                if (args.server_port <= 0 || args.server_port > 65535) {
+                    PrintUsageAndExit(EXIT_FAILURE, "Error: port must be a positive integer between 1 and 65535");
+                }
+
+                i++;
+                continue;
+            }
+
+            if (std::strcmp(argv[i], "--out") == 0 || std::strcmp(argv[i], "-o") == 0) {
+                if (saw_out) {
+                    PrintUsageAndExit(EXIT_FAILURE, "Error: out may only be passed once");
+                }
+                if (i + 1 >= argc) {
+                    PrintUsageAndExit(EXIT_FAILURE, "Error: out requires a path argument");
                 }
 
                 args.output_path = argv[i + 1];
-                saw_output = true;
+                saw_out = true;
+                i++;
+                continue;
+            }
+
+            if (std::strcmp(argv[i], "--hw-out") == 0) {
+                if (saw_hw_out) {
+                    PrintUsageAndExit(EXIT_FAILURE, "Error: hw-out may only be passed once");
+                }
+                if (i + 1 >= argc) {
+                    PrintUsageAndExit(EXIT_FAILURE, "Error: hw-out requires a path argument");
+                }
+
+                args.hardware_metrics_output_path = argv[i + 1];
+                saw_hw_out = true;
                 i++;
                 continue;
             }

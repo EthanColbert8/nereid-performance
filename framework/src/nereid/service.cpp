@@ -16,7 +16,7 @@ namespace nereid {
 
     constexpr int POLL_SLEEP_MICROSECONDS = 250000; // 250 milliseconds
 
-    bool WaitForServerReady(const char* server_address, const char* server_port, pid_t server_pid, int startup_timeout_secs, std::string* error_message) {
+    bool WaitForServerReady(const char* server_address, int server_port, pid_t server_pid, int startup_timeout_secs, std::string* error_message) {
         std::string combined_server_address;
         if (!utils::BuildAddress(server_address, server_port, &combined_server_address, error_message)) {
             return false;
@@ -54,7 +54,7 @@ namespace nereid {
         return false;
     }
 
-    bool WaitForServerReady(const char* server_address, const char* server_port, int startup_timeout_secs, std::string* error_message) {
+    bool WaitForServerReady(const char* server_address, int server_port, int startup_timeout_secs, std::string* error_message) {
         std::string combined_server_address;
         if (!utils::BuildAddress(server_address, server_port, &combined_server_address, error_message)) {
             return false;

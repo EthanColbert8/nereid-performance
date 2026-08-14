@@ -15,7 +15,7 @@ namespace cli {
         int num_trials;
         const char* server_binary_path;
         const char* server_address;
-        const char* server_port;
+        int server_port;
         const char* output_path;
         const char* hardware_metrics_output_path;
         const PartialModelSpec* model_specs;
