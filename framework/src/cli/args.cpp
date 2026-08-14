@@ -43,6 +43,7 @@ namespace cli {
 
     constexpr Args DEFAULT_ARGS = {
         num_trials: 100,
+        log_file: stderr, // TODO (Ethan): This doesn't work (stderr isn't constexpr), so have to add the default at end of ParseArgs instead.
         server_binary_path: "./nereid-server",
         server_address: "localhost",
         server_port: 50051,
@@ -52,7 +53,8 @@ namespace cli {
         model_count: static_cast<int>(sizeof(DEFAULT_MODEL_SPECS) / sizeof(DEFAULT_MODEL_SPECS[0])),
         batch_sizes: DEFAULT_BATCH_SIZES,
         batch_size_count: static_cast<int>(sizeof(DEFAULT_BATCH_SIZES) / sizeof(DEFAULT_BATCH_SIZES[0])),
-        launch_server: false
+        launch_server: false,
+        verbose: false
     };
 
     constexpr const char* const USAGE_MESSAGE = R"(Usage: nereid-bench [options]
@@ -64,7 +66,9 @@ Options:
         --port <port>: gRPC port for the server (default: 50051)
     -o, --out <path>: Summary JSON output path (default: nereid_benchmark_summary.json)
         --hw-out <path>: Hardware metrics JSON output path (default: nereid_hardware_util.json)
+        --log <path>: Log file path (default: stderr)
         --launch-server: Launch a server process to benchmark
+        --verbose: Enable debug-level logging
 )";
 
     [[noreturn]] void PrintUsageAndExit(int exit_code, const char* message = nullptr) {
@@ -109,6 +113,7 @@ Options:
         bool saw_port = false;
         bool saw_out = false;
         bool saw_hw_out = false;
+        bool saw_log = false;
 
         for (int i = 1; i < argc; i++) {
             if (std::strcmp(argv[i], "--help") == 0 || std::strcmp(argv[i], "-h") == 0) {
@@ -117,6 +122,11 @@ Options:
 
             if (std::strcmp(argv[i], "--launch-server") == 0) {
                 args.launch_server = true;
+                continue;
+            }
+
+            if (std::strcmp(argv[i], "--verbose") == 0) {
+                args.verbose = true;
                 continue;
             }
 
@@ -206,6 +216,29 @@ Options:
 
                 args.hardware_metrics_output_path = argv[i + 1];
                 saw_hw_out = true;
+                i++;
+                continue;
+            }
+
+            if (std::strcmp(argv[i], "--log") == 0) {
+                if (saw_log) {
+                    PrintUsageAndExit(EXIT_FAILURE, "Error: log may only be passed once");
+                }
+                if (i + 1 >= argc) {
+                    PrintUsageAndExit(EXIT_FAILURE, "Error: log requires a path argument");
+                }
+
+                if (args.log_file != stderr && args.log_file != stdout && args.log_file != nullptr) {
+                    std::fclose(args.log_file);
+                }
+
+                args.log_file = std::fopen(argv[i + 1], "w");
+                if (args.log_file == nullptr) {
+                    char err_string[256];
+                    std::snprintf(err_string, sizeof(err_string), "Error: failed to open log file \"%s\": %s", argv[i + 1], std::strerror(errno));
+                    PrintUsageAndExit(EXIT_FAILURE, err_string);
+                }
+
                 i++;
                 continue;
             }

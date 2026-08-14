@@ -38,7 +38,7 @@ bool WriteReport(const char* path, const nlohmann::json& report, logging::Logger
 
 int main(int argc, char* argv[]) {
     cli::Args args = cli::ParseArgs(argc, argv);
-    logging::Logger logger(stderr, logging::INFO, LOG_BUFFER_SIZE_BYTES);
+    logging::Logger logger(args.log_file, args.verbose ? logging::DEBUG :: logging::INFO, LOG_BUFFER_SIZE_BYTES);
 
     benchmark::BenchmarkContext ctx;
     nlohmann::json report;

@@ -38,6 +38,10 @@ namespace logging {
 
     Logger::~Logger() {
         flush();
+
+        if (out != stdout && out != stderr) {
+            fclose(out);
+        }
     }
 
     void Logger::flush() {
