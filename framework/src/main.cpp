@@ -1,11 +1,14 @@
 #include "cli/args.h"
 #include "logging/logger.h"
 #include "process/control.h"
+#include "process/hardware.h"
 #include "nereid/service.h"
 #include "benchmark/context.h"
 #include "benchmark/runner.h"
 #include "utils/errors.h"
 
+#include <atomic>
+#include <thread>
 #include <cstdio>
 #include <cstdlib>
 #include <string>
@@ -43,6 +46,13 @@ int main(int argc, char* argv[]) {
     benchmark::BenchmarkContext ctx;
     nlohmann::json report;
 
+    // All the stuff needed for hardware metrics collection
+    process::HardwareMetricsContext hardware_metrics_context;
+    process::HardwareMetrics hardware_metrics;
+    std::atomic_bool stop_hardware_metrics(false);
+    std::thread hardware_metrics_thread;
+    bool hardware_metrics_running = false;
+
     process::ServerProcess server;
     server.pid = -1;
     server.owned = false;
@@ -75,11 +85,33 @@ int main(int argc, char* argv[]) {
         return EXIT_FAILURE;
     }
 
+    // Collect hardware metrics for server process
+    if (server.pid > 0) { // NOTE (Ethan): this condition will change when we allow a PID to be passed in
+        hardware_metrics_context.interval = std::chrono::milliseconds(250); // TODO (Ethan): make this configurable
+        hardware_metrics_context.server_pid = server.pid;
+
+        hardware_metrics_thread = std::thread(
+            process::ScrapeHardwareMetrics,
+            std::ref(stop_hardware_metrics),
+            hardware_metrics_context,
+            std::ref(hardware_metrics)
+        );
+        hardware_metrics_running = true;
+    }
+
     logger.info("Beginning benchmark");
     if (!benchmark::RunBenchmark(ctx, &report, &error_message)) {
         logger.error("%s", error_message.c_str());
         process::StopServer(server);
         return EXIT_FAILURE;
+    }
+
+    if (hardware_metrics_running) {
+        stop_hardware_metrics.store(true);
+        hardware_metrics_thread.join();
+        hardware_metrics_running = false;
+
+        logger.info("Hardware metrics collected, got %d samples", hardware_metrics.count);
     }
 
     if (!WriteReport(args, report, &error_message)) {
