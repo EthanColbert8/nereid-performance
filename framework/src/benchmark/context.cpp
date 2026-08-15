@@ -1,6 +1,6 @@
 #include "benchmark/context.h"
 
-#include "cli/args.h"
+#include "config/settings.h"
 #include "logging/logger.h"
 #include "nereid/model.h"
 #include "utils/address.h"
@@ -17,10 +17,12 @@
 #include "grpc_service.grpc.pb.h"
 #include "grpc_service.pb.h"
 
+// HERE: This guy needs major updating!!
+
 namespace benchmark {
 
     bool MergeInputShape(
-        const cli::PartialModelSpec& partial_model_spec,
+        const config::PartialModelSpec& partial_model_spec,
         int input_index,
         const inference::ModelMetadataResponse::TensorMetadata& server_input,
         nereid::TensorSpec* merged_input,
@@ -90,24 +92,24 @@ namespace benchmark {
         return true;
     }
 
-    bool BuildBenchmarkContext(const cli::Args& args, BenchmarkContext* context, logging::Logger& logger) {
+    bool BuildBenchmarkContext(const config::Settings& args, BenchmarkContext* context, logging::Logger& logger) {
         if (context == nullptr) {
             logger.error("benchmark context pointer is null");
             return false;
         }
 
         static std::string combined_server_address;
-        if (!utils::BuildAddress(args.server_address, args.server_port, &combined_server_address)) {
+        if (!utils::BuildAddress(args.server_address.c_str(), args.server_port, &combined_server_address)) {
             logger.error("invalid server address and/or port");
             return false;
         }
 
-        if (args.model_specs == nullptr || args.model_count <= 0) {
+        if (args.model_specs.size() < 1) {
             logger.error("no benchmark models were provided");
             return false;
         }
 
-        if (args.batch_sizes == nullptr || args.batch_size_count <= 0) {
+        if (args.batch_sizes.size() < 1) {
             logger.error("no batch sizes were provided");
             return false;
         }
