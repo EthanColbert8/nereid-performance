@@ -43,7 +43,7 @@ namespace cli {
 
     constexpr Args DEFAULT_ARGS = {
         num_trials: 100,
-        log_file: stderr, // TODO (Ethan): This doesn't work (stderr isn't constexpr), so have to add the default at end of ParseArgs instead.
+        log_file: nullptr, // stderr isn't constexpr so have to set in ParseArgs
         server_binary_path: "./nereid-server",
         server_address: "localhost",
         server_port: 50051,
@@ -85,6 +85,7 @@ Options:
             args.server_binary_path != nullptr && *args.server_binary_path != '\0' &&
             args.server_address != nullptr && *args.server_address != '\0' &&
             args.output_path != nullptr && *args.output_path != '\0' &&
+            args.log_file != nullptr &&
             args.model_specs != nullptr && args.model_count > 0 &&
             args.batch_sizes != nullptr && args.batch_size_count > 0
         );
@@ -246,6 +247,10 @@ Options:
             char err_string[256];
             std::snprintf(err_string, sizeof(err_string), "Error: unrecognized argument: %s", argv[i]);
             PrintUsageAndExit(EXIT_FAILURE, err_string);
+        }
+
+        if (args.log_file == nullptr) {
+            args.log_file = stderr;
         }
 
         if (!ValidateArgs(args)) {
