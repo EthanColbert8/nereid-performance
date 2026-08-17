@@ -4,6 +4,7 @@
 
 #include <cstdio>
 #include <cstdint>
+#include <sys/types.h>
 #include <vector>
 #include <optional>
 #include <string>
@@ -22,6 +23,7 @@ namespace config {
         std::optional<std::string> server_binary_path;
         std::optional<std::string> server_address;
         std::optional<int> server_port;
+        std::optional<pid_t> server_pid;
 
         std::optional<int> num_trials;
 
@@ -44,6 +46,7 @@ namespace config {
         std::string server_binary_path;
         std::string server_address;
         int server_port;
+        pid_t server_pid;
 
         std::string output_path;
         std::string hardware_metrics_output_path;

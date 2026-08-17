@@ -4,6 +4,7 @@
 #include <cerrno>
 #include <cstdio>
 #include <cstdint>
+#include <sys/types.h>
 #include <vector>
 #include <string>
 
@@ -60,6 +61,12 @@ namespace config {
             "port to connect to Nereid server (default: " + std::to_string(DEFAULT_SERVER_PORT) + ")"
         );
 
+        pid_t server_pid;
+        auto* pid_opt = app.add_option(
+            "--server-pid", server_pid,
+            "PID of server instance to allow for monitoring of process metrics if not launched"
+        );
+
         int num_trials;
         auto* trials_opt = app.add_option(
             "-n,--num-trials", num_trials,
@@ -83,6 +90,7 @@ namespace config {
         if (server_binary_opt->count()) { args.server_binary_path = server_binary_path; }
         if (address_opt->count()) { args.server_address = server_address; }
         if (port_opt->count()) { args.server_port = server_port; }
+        if (pid_opt->count()) { args.server_pid = server_pid; }
         if (trials_opt->count()) { args.num_trials = num_trials; }
         if (launch_flag->count()) { args.launch_server = true; }
         if (verbose_flag->count()) { args.verbose = true; }
@@ -109,6 +117,7 @@ namespace config {
         s.server_binary_path = DEFAULT_SERVER_BINARY_PATH;
         s.server_address = DEFAULT_SERVER_ADDRESS;
         s.server_port = DEFAULT_SERVER_PORT;
+        s.server_pid = -1;
         s.num_trials = DEFAULT_NUM_TRIALS;
 
         s.log_file = stderr;
@@ -120,6 +129,7 @@ namespace config {
         if (config_args.cli_args.server_binary_path) { s.server_binary_path = config_args.cli_args.server_binary_path.value(); }
         if (config_args.cli_args.server_address) { s.server_address = config_args.cli_args.server_address.value(); }
         if (config_args.cli_args.server_port) { s.server_port = config_args.cli_args.server_port.value(); }
+        // no config option for server_pid, as that is intended for scripting
         if (config_args.cli_args.num_trials) { s.num_trials = config_args.cli_args.num_trials.value(); }
         if (config_args.cli_args.launch_server) { s.launch_server = config_args.cli_args.launch_server.value(); }
         if (config_args.cli_args.verbose) { s.verbose = config_args.cli_args.verbose.value(); }
@@ -132,6 +142,7 @@ namespace config {
         if (cli_args.server_binary_path) { s.server_binary_path = cli_args.server_binary_path.value(); }
         if (cli_args.server_address) { s.server_address = cli_args.server_address.value(); }
         if (cli_args.server_port) { s.server_port = cli_args.server_port.value(); }
+        if (cli_args.server_pid) { s.server_pid = cli_args.server_pid.value(); }
         if (cli_args.num_trials) { s.num_trials = cli_args.num_trials.value(); }
         if (cli_args.launch_server) { s.launch_server = cli_args.launch_server.value(); }
         if (cli_args.verbose) { s.verbose = cli_args.verbose.value(); }
@@ -149,6 +160,11 @@ namespace config {
                 std::fprintf(stderr, "Failed to open log file '%s': %s\n", config_args.cli_args.log_path.value().c_str(), std::strerror(errno));
                 s.log_file = stderr;
             }
+        }
+
+        // add some default batch sizes if there were never any configured
+        if (s.batch_sizes.empty()) {
+            s.batch_sizes.assign({4, 8, 16, 32, 64, 128});
         }
     }
 

@@ -72,6 +72,11 @@ int main(int argc, char* argv[]) {
             process::StopServer(server, logger);
             return EXIT_FAILURE;
         }
+
+        // TODO (Ethan): check if process exists and set `server.pid` if so
+        if (settings.server_pid > 0) {
+            logger.error("NOT IMPLEMENTED: process monitoring for external processes (server PID %d given)", settings.server_pid);
+        }
     }
     logger.info("Server found ready at address \"%s:%d\"", settings.server_address.c_str(), settings.server_port);
 
