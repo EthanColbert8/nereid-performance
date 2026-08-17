@@ -3,6 +3,7 @@
 #include "nereid/model.h"
 #include "analysis/stats.h"
 #include "logging/logger.h"
+#include "utils/timestamp.h"
 
 #include <chrono>
 #include <cmath>
@@ -238,6 +239,7 @@ namespace benchmark {
             }
             model_json["outputs"] = outputs_json;
 
+            nlohmann::json model_timestamps = nlohmann::json::array();
             nlohmann::json model_batch_sizes = nlohmann::json::array();
             nlohmann::json model_latency = nlohmann::json::array();
             nlohmann::json model_latency_std = nlohmann::json::array();
@@ -255,10 +257,14 @@ namespace benchmark {
 
                 logger.info("Beginning scan for model \"%s\" with batch size %d", spec.name.c_str(), batch_size);
 
+                char start_time[32];
+                utils::FormatTimestamp(start_time, sizeof(start_time));
+
                 if (!RunBatchTrials(stub.get(), spec, rand_gen, ctx.num_trials, batch_size, &latency_stats, &throughput_stats, logger)) {
                     return false;
                 }
 
+                model_timestamps.push_back(std::string(start_time));
                 model_batch_sizes.push_back(batch_size);
                 model_latency.push_back(analysis::RunningStatsMean(latency_stats));
                 model_latency_std.push_back(analysis::RunningStatsStdDev(latency_stats));
@@ -268,6 +274,7 @@ namespace benchmark {
                 model_throughput_stderr.push_back(analysis::RunningStatsStdErr(throughput_stats));
             }
 
+            model_json["start_times"] = model_timestamps;
             model_json["batch_sizes"] = model_batch_sizes;
             model_json["latency_ms"] = model_latency;
             model_json["latency_ms_std"] = model_latency_std;

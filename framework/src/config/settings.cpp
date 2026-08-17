@@ -14,7 +14,7 @@ namespace config {
 
     constexpr const char* const DEFAULT_OUTPUT_PATH = "nereid_benchmark_summary.json";
     constexpr const char* const DEFAULT_HARDWARE_OUTPUT_PATH = "nereid_hardware_util.json";
-    constexpr const char* const DEFAULT_SERVER_BINARY_PATH = "./nereid_server";
+    constexpr const char* const DEFAULT_SERVER_BINARY_PATH = "./nereid-server";
     constexpr const char* const DEFAULT_SERVER_ADDRESS = "localhost";
     constexpr int DEFAULT_SERVER_PORT = 50051;
     constexpr int DEFAULT_NUM_TRIALS = 100;

@@ -40,7 +40,7 @@ int main(int argc, char* argv[]) {
     config::Settings settings;
     config::LoadProgramSettings(settings, argc, argv);
 
-    logging::Logger logger(settings.log_file, settings.verbose ? logging::DEBUG : logging::INFO, LOG_BUFFER_SIZE_BYTES);
+    logging::Logger logger(settings.log_file, settings.verbose ? logging::LogLevel::DEBUG : logging::LogLevel::INFO, LOG_BUFFER_SIZE_BYTES);
 
     benchmark::BenchmarkContext ctx;
     nlohmann::json report;

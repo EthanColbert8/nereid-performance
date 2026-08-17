@@ -8,9 +8,10 @@
 [x] Create an actual enum for data types, rather than using a string
 [x] Create a logging system
 [x] Reorganize JSON output - it's awful rn
-[ ] Include timestamps of when trials started in benchmark report
+[x] Include timestamps of when trials started in benchmark report
 [ ] Get Nereid server logs sent to a file (currently it's `/dev/null`) when we own process
-[ ] Allow logging to files other than stderr
-[ ] Start thinking about benchmark configuration via YAML
+[x] Allow logging to files other than stderr
+[x] Start thinking about benchmark configuration via YAML
 [ ] Default to running all loaded models with non-ambiguous input shapes
 [ ] Gather GPU hardware information - GPU model, preferably live metrics...
+[ ] Multi-client scans that run in threads

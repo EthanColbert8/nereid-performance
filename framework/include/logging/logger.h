@@ -5,7 +5,7 @@
 
 namespace logging {
 
-    enum LogLevel {
+    enum class LogLevel {
         DEBUG = 0,
         INFO = 4,
         WARNING = 8,
@@ -25,7 +25,7 @@ namespace logging {
             void write_log(LogLevel level, const char* format, va_list args);
 
         public:
-            explicit Logger(FILE* out, LogLevel level = INFO, size_t capacity = 16384);
+            explicit Logger(FILE* out, LogLevel level = LogLevel::INFO, size_t capacity = 16384);
             ~Logger();
 
             // Don't allow copying or assigning a logger instance
