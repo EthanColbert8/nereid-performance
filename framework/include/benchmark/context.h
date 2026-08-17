@@ -1,6 +1,6 @@
 #pragma once
 
-#include "cli/args.h"
+#include "config/settings.h"
 #include "logging/logger.h"
 #include "nereid/model.h"
 
@@ -9,8 +9,8 @@
 
 namespace benchmark {
 
+    // TODO (Ethan): change this guy to just use vectors, it's too much work to try to translate all the time
     struct BenchmarkContext {
-        logging::Logger* logger;
         const char* server_address; // already put together with port
         const nereid::ModelSpec* model_specs;
         int model_count;
@@ -19,6 +19,6 @@ namespace benchmark {
         int num_trials;
     };
 
-    bool BuildBenchmarkContext(const cli::Args& args, BenchmarkContext* context, logging::Logger* logger, std::string* error_message);
+    bool BuildBenchmarkContext(const config::Settings& args, BenchmarkContext* context, logging::Logger& logger);
 
 } // namespace benchmark

@@ -1,6 +1,6 @@
 #include "nereid/service.h"
 #include "utils/address.h"
-#include "utils/errors.h"
+#include "logging/logger.h"
 
 #include <chrono>
 #include <string>
@@ -16,9 +16,10 @@ namespace nereid {
 
     constexpr int POLL_SLEEP_MICROSECONDS = 250000; // 250 milliseconds
 
-    bool WaitForServerReady(const char* server_address, const char* server_port, pid_t server_pid, int startup_timeout_secs, std::string* error_message) {
+    bool WaitForServerReady(const char* server_address, int server_port, pid_t server_pid, int startup_timeout_secs, logging::Logger& logger) {
         std::string combined_server_address;
-        if (!utils::BuildAddress(server_address, server_port, &combined_server_address, error_message)) {
+        if (!utils::BuildAddress(server_address, server_port, &combined_server_address)) {
+            logger.error("invalid server address and/or port");
             return false;
         }
 
@@ -43,20 +44,21 @@ namespace nereid {
             int status = 0;
             const pid_t child_result = waitpid(server_pid, &status, WNOHANG);
             if (child_result > 0) {
-                utils::SetError(error_message, "server process exited before becoming ready");
+                logger.error("server process exited before becoming ready");
                 return false;
             }
 
             usleep(POLL_SLEEP_MICROSECONDS);
         }
 
-        utils::SetError(error_message, "timed out waiting for server readiness");
+        logger.error("timed out waiting for server readiness");
         return false;
     }
 
-    bool WaitForServerReady(const char* server_address, const char* server_port, int startup_timeout_secs, std::string* error_message) {
+    bool WaitForServerReady(const char* server_address, int server_port, int startup_timeout_secs, logging::Logger& logger) {
         std::string combined_server_address;
-        if (!utils::BuildAddress(server_address, server_port, &combined_server_address, error_message)) {
+        if (!utils::BuildAddress(server_address, server_port, &combined_server_address)) {
+            logger.error("invalid server address and/or port");
             return false;
         }
 
@@ -81,7 +83,7 @@ namespace nereid {
             usleep(POLL_SLEEP_MICROSECONDS);
         }
 
-        utils::SetError(error_message, "timed out waiting for server readiness");
+        logger.error("timed out waiting for server readiness");
         return false;
     }
 

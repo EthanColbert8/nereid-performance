@@ -1,10 +1,9 @@
 #include "benchmark/context.h"
 
-#include "cli/args.h"
+#include "config/settings.h"
 #include "logging/logger.h"
 #include "nereid/model.h"
 #include "utils/address.h"
-#include "utils/errors.h"
 
 #include <climits>
 #include <cstdint>
@@ -18,109 +17,137 @@
 #include "grpc_service.grpc.pb.h"
 #include "grpc_service.pb.h"
 
+// HERE: This guy needs major updating!!
+
 namespace benchmark {
 
+    constexpr int64_t DEFAULT_DYNAMIC_SIZE = 16;
+
+    // TODO (Ethan): check equality of tensor names in here...
     bool MergeInputShape(
-        const cli::PartialModelSpec& partial_model_spec,
-        int input_index,
+        const nereid::TensorSpec& config_input,
         const inference::ModelMetadataResponse::TensorMetadata& server_input,
-        nereid::TensorSpec* merged_input,
-        std::string* error_message
+        nereid::TensorSpec& merged_input,
+        logging::Logger& logger
     ) {
-        if (input_index < 0 || input_index >= partial_model_spec.input_count) {
-            utils::SetError(error_message, "internal error: input index out of range while building benchmark context");
+        nereid::TensorDtype server_dtype = nereid::StringToDtype(server_input.datatype());
+        if (server_dtype == nereid::TensorDtype::INVALID) {
+            logger.error("invalid input datatype for model \"%s\": \"%s\"", server_input.name().c_str(), server_input.datatype().c_str());
             return false;
         }
 
-        if (partial_model_spec.input_shapes == nullptr || partial_model_spec.input_shape_counts == nullptr) {
-            utils::SetError(error_message, std::string("invalid partial model spec for model: ") + partial_model_spec.name);
-            return false;
+        // No shape in config, use server's spec and default dynamic size
+        // (we use nothing from config if it doesn't provide a shape).
+        if (config_input.shape.size() == 0) {
+            merged_input.name = server_input.name();
+            merged_input.dtype = server_dtype;
+            merged_input.shape.clear();
+            merged_input.shape.reserve(server_input.shape_size());
+
+            if (server_input.shape(0) >= 1) {
+                merged_input.shape.push_back(server_input.shape(0));
+            }
+
+            for (size_t i = 1; i < server_input.shape_size(); i++) {
+                int64_t dim = server_input.shape(i);
+
+                if (dim >= 1) {
+                    merged_input.shape.push_back(dim);
+                }
+                else {
+                    merged_input.shape.push_back(DEFAULT_DYNAMIC_SIZE);
+                }
+            }
+            return true;
         }
 
-        const int64_t* cli_shape = partial_model_spec.input_shapes[input_index];
-        const int cli_shape_count = partial_model_spec.input_shape_counts[input_index];
-        if (cli_shape == nullptr || cli_shape_count <= 0) {
-            utils::SetError(error_message, std::string("invalid input shape for model: ") + partial_model_spec.name);
-            return false;
-        }
-
-        const int server_shape_count = server_input.shape_size();
-        const bool has_batch_dimension = (server_shape_count == cli_shape_count + 1 && server_input.shape(0) == -1);
-        if (!has_batch_dimension && server_shape_count != cli_shape_count) {
-            utils::SetError(
-                error_message,
-                std::string("input shape rank mismatch for model: ") + partial_model_spec.name +
-                    " (server reported " + std::to_string(server_shape_count) +
-                    " dims, CLI provided " + std::to_string(cli_shape_count) + ")"
+        // Error if config and server dtypes mismatch
+        if (server_dtype != config_input.dtype) {
+            logger.error(
+                "input dtype mismatch for model \"%s\": server reported %s, config provided %s",
+                server_input.name().c_str(), server_input.datatype().c_str(), nereid::DtypeToString(config_input.dtype).c_str()
             );
             return false;
         }
 
-        nereid::TensorDtype dtype = nereid::StringToDtype(server_input.datatype(), error_message);
-        if (dtype == nereid::TensorDtype::INVALID) { return false; }
+        const int server_shape_count = server_input.shape_size();
+        const int config_shape_count = config_input.shape.size();
 
-        merged_input->name = server_input.name();
-        merged_input->dtype = dtype;
-        merged_input->shape.clear();
-        merged_input->shape.reserve(static_cast<size_t>(cli_shape_count));
+        const bool has_batch_dim = (server_shape_count == config_shape_count + 1) && (server_input.shape(0) == -1);
+        if ((!has_batch_dim) && (server_shape_count != config_shape_count)) {
+            logger.error(
+                "input shape rank mismatch for model \"%s\": server reported %d dims, config provided %d dims",
+                config_input.name, server_shape_count, config_shape_count
+            );
+            return false;
+        }
 
-        const int server_start_index = has_batch_dimension ? 1 : 0;
-        const int cli_start_index = 0;
-        for (int server_index = server_start_index, cli_index = cli_start_index; server_index < server_shape_count; server_index++, cli_index++) {
-            const int64_t server_dim = server_input.shape(server_index);
-            const int64_t cli_dim = cli_shape[cli_index];
+        merged_input.name = server_input.name();
+        merged_input.dtype = server_dtype;
+        merged_input.shape.clear();
+        merged_input.shape.reserve(config_shape_count);
 
-            if (cli_dim <= 0) {
-                utils::SetError(error_message, std::string("CLI shape contains a non-positive dimension for model: ") + partial_model_spec.name);
-                return false;
-            }
+        int server_shape_idx = has_batch_dim ? 1 : 0;
+        int config_shape_idx = 0;
+        while (config_shape_idx < config_shape_count) {
+            int64_t server_shape_val = server_input.shape(server_shape_idx);
+            int64_t config_shape_val = config_input.shape[config_shape_idx];
 
-            if (server_dim == -1) {
-                merged_input->shape.push_back(cli_dim);
-                continue;
-            }
-
-            if (server_dim != cli_dim) {
-                utils::SetError(
-                    error_message,
-                    std::string("input shape mismatch for model: ") + partial_model_spec.name +
-                        " (server dim " + std::to_string(server_dim) +
-                        ", CLI dim " + std::to_string(cli_dim) + ")"
+            if (config_shape_val < 1) {
+                // NOTE (Ethan): this means we can still error after altering data in merged_input...
+                //               should try to avoid that maybe?
+                logger.error(
+                    "invalid config shape value for model \"%s\": got %d while values must be >=1",
+                    server_input.name(), config_shape_val
                 );
                 return false;
             }
 
-            merged_input->shape.push_back(server_dim);
-        }
+            if (server_shape_val >= 1) {
+                if (server_shape_val != config_shape_val) {
+                    logger.error(
+                        "input shpae value mismatch for model \"%s\": server reported %d, config provided %d",
+                        server_input.name(), server_shape_val, config_shape_val
+                    );
+                    return false;
+                }
+                merged_input.shape.push_back(server_shape_val);
+            }
+            else {
+                merged_input.shape.push_back(config_shape_val);
+            }
 
+            server_shape_idx++;
+            config_shape_idx++;
+        }
         return true;
     }
 
-    bool BuildBenchmarkContext(const cli::Args& args, BenchmarkContext* context, logging::Logger* logger, std::string* error_message) {
+    bool BuildBenchmarkContext(const config::Settings& args, BenchmarkContext* context, logging::Logger& logger) {
         if (context == nullptr) {
-            utils::SetError(error_message, "benchmark context output pointer is null");
+            logger.error("benchmark context pointer is null");
             return false;
         }
 
         static std::string combined_server_address;
-        if (!utils::BuildAddress(args.server_address, args.server_port, &combined_server_address, error_message)) {
+        if (!utils::BuildAddress(args.server_address.c_str(), args.server_port, &combined_server_address)) {
+            logger.error("invalid server address and/or port: %s:%d", args.server_address.c_str(), args.server_port);
             return false;
         }
 
-        if (args.model_specs == nullptr || args.model_count <= 0) {
-            utils::SetError(error_message, "no benchmark models were provided");
+        if (args.model_specs.size() < 1) {
+            logger.error("no benchmark models were provided");
             return false;
         }
 
-        if (args.batch_sizes == nullptr || args.batch_size_count <= 0) {
-            utils::SetError(error_message, "no batch sizes were provided");
+        if (args.batch_sizes.size() < 1) {
+            logger.error("no batch sizes were provided");
             return false;
         }
 
-        context->logger = logger;
         context->server_address = combined_server_address.c_str();
-        context->batch_sizes = args.batch_sizes;
-        context->batch_size_count = args.batch_size_count;
+        context->batch_sizes = args.batch_sizes.data();
+        context->batch_size_count = args.batch_sizes.size();
         context->num_trials = args.num_trials;
 
         auto channel = grpc::CreateChannel(context->server_address, grpc::InsecureChannelCredentials());
@@ -128,41 +155,38 @@ namespace benchmark {
 
         static std::vector<nereid::ModelSpec> merged_model_specs;
         merged_model_specs.clear();
-        merged_model_specs.reserve(static_cast<size_t>(args.model_count));
 
-        for (int model_index = 0; model_index < args.model_count; model_index++) {
-            const cli::PartialModelSpec& partial_model_spec = args.model_specs[model_index];
-            if (partial_model_spec.name == nullptr || *partial_model_spec.name == '\0') {
-                utils::SetError(error_message, "encountered an unnamed model in the CLI args");
-                return false;
-            }
+        // TODO (Ethan): discover models on server if not configured
+        if (args.model_specs.size() < 1) {
+            logger.error("no models found in run configuration");
+            return false;
+        }
+
+        merged_model_specs.reserve(args.model_specs.size());
+
+        for (size_t model_index = 0; model_index < args.model_specs.size(); model_index++) {
+            const nereid::ModelSpec& config_spec = args.model_specs[model_index];
 
             grpc::ClientContext metadata_context;
             inference::ModelMetadataRequest metadata_request;
             inference::ModelMetadataResponse metadata_response;
-            metadata_request.set_name(partial_model_spec.name);
+            metadata_request.set_name(config_spec.name);
 
             const grpc::Status metadata_status = stub->ModelMetadata(&metadata_context, metadata_request, &metadata_response);
             if (!metadata_status.ok()) {
                 if (metadata_status.error_code() == grpc::StatusCode::NOT_FOUND) {
-                    logger->warning("Skipping model \"%s\" because it does not exist on the server", partial_model_spec.name);
+                    logger.warning("Skipping model \"%s\" because it does not exist on the server", config_spec.name.c_str());
                     continue;
                 }
 
-                utils::SetError(
-                    error_message,
-                    std::string("failed to fetch metadata for model: ") + partial_model_spec.name +
-                        " (" + metadata_status.error_message() + ")"
-                );
+                logger.error("failed to fetch metadata for model \"%s\": %s", config_spec.name.c_str(), metadata_status.error_message().c_str());
                 return false;
             }
 
-            if (metadata_response.inputs_size() != partial_model_spec.input_count) {
-                utils::SetError(
-                    error_message,
-                    std::string("input count mismatch for model: ") + partial_model_spec.name +
-                        " (server reported " + std::to_string(metadata_response.inputs_size()) +
-                        ", CLI provided " + std::to_string(partial_model_spec.input_count) + ")"
+            if (metadata_response.inputs_size() != config_spec.inputs.size()) {
+                logger.error(
+                    "input count mismatch for model \"%s\": server reported %d, CLI provided %d",
+                    config_spec.name.c_str(), metadata_response.inputs_size(), config_spec.inputs.size()
                 );
                 return false;
             }
@@ -179,9 +203,9 @@ namespace benchmark {
             merged_spec.inputs.reserve(static_cast<size_t>(metadata_response.inputs_size()));
             for (int input_index = 0; input_index < metadata_response.inputs_size(); input_index++) {
                 nereid::TensorSpec merged_input = {};
-
-                // TODO (Ethan): match server and CLI input names, don't assume they're in same order
-                if (!MergeInputShape(partial_model_spec, input_index, metadata_response.inputs(input_index), &merged_input, error_message)) {
+                
+                // TODO (Ethan): match input tensor names, don't assume config has same order as server
+                if (!MergeInputShape(config_spec.inputs[input_index], metadata_response.inputs(input_index), merged_input, logger)) {
                     return false;
                 }
 
@@ -193,10 +217,12 @@ namespace benchmark {
                 const auto& output = metadata_response.outputs(output_index);
                 nereid::TensorSpec merged_output = {};
                 merged_output.name = output.name();
-                
-                nereid::TensorDtype dtype = nereid::StringToDtype(output.datatype(), error_message);
-                if (dtype == nereid::TensorDtype::INVALID) { return false; }
-                merged_output.dtype = dtype;
+
+                merged_output.dtype = nereid::StringToDtype(output.datatype());
+                if (merged_output.dtype == nereid::TensorDtype::INVALID) {
+                    logger.error("invalid output datatype for model \"%s\": \"%s\"", config_spec.name.c_str(), output.datatype().c_str());
+                    return false;
+                }
 
                 merged_output.shape.reserve(static_cast<size_t>(output.shape_size()));
                 for (int shape_index = 0; shape_index < output.shape_size(); shape_index++) {
@@ -206,7 +232,7 @@ namespace benchmark {
             }
 
             if (merged_spec.inputs.empty() || merged_spec.outputs.empty()) {
-                utils::SetError(error_message, std::string("model metadata missing inputs or outputs: ") + partial_model_spec.name);
+                logger.error("metadata for model \"%s\" missing inputs or outputs", config_spec.name.c_str());
                 return false;
             }
 
@@ -214,7 +240,7 @@ namespace benchmark {
         }
 
         if (merged_model_specs.empty()) {
-            utils::SetError(error_message, "no desired models were found on the server");
+            logger.error("no desired models were found on the server");
             return false;
         }
 

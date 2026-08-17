@@ -1,0 +1,49 @@
+batch_sizes: [4, 8, 16, 32, 64, 128]
+
+models:
+  - name: "particlenet_AK4_PT"
+    version: "1"
+    platform: "pytorch_libtorch"
+    inputs:
+      - name: "pf_points"
+        dtype: "FP32"
+        shape: [2, 100]
+      - name: "pf_features"
+        dtype: "FP32"
+        shape: [20, 100]
+      - name: "pf_mask"
+        dtype: "FP32"
+        shape: [1, 100]
+      - name: "sv_points"
+        dtype: "FP32"
+        shape: [2, 10]
+      - name: "sv_features"
+        dtype: "FP32"
+        shape: [11, 10]
+      - name: "sv_mask"
+        dtype: "FP32"
+        shape: [1, 10]
+
+  - name: "particlenet_AK4"
+    version: "1"
+    platform: "onnxruntime"
+    inputs:
+      - name: "pf_points"
+        dtype: "FP32"
+        shape: [2, 100]
+      - name: "pf_features"
+        dtype: "FP32"
+        shape: [20, 100]
+      - name: "pf_mask"
+        dtype: "FP32"
+        shape: [1, 100]
+      - name: "sv_points"
+        dtype: "FP32"
+        shape: [2, 10]
+      - name: "sv_features"
+        dtype: "FP32"
+        shape: [11, 10]
+      - name: "sv_mask"
+        dtype: "FP32"
+        shape: [1, 10]
+
