@@ -75,8 +75,8 @@ namespace benchmark {
         standard_normal_generator& rand_gen,
         int num_trials,
         int batch_size,
-        analysis::RunningStats* latency_stats,
-        analysis::RunningStats* throughput_stats,
+        analysis::RunningStats& latency_stats,
+        analysis::RunningStats& throughput_stats,
         logging::Logger& logger
     ) {
         inference::ModelInferRequest request;
@@ -149,8 +149,8 @@ namespace benchmark {
             double latency_ms = std::chrono::duration<double, std::milli>(end_time - start_time).count();
             double throughput = static_cast<double>(batch_size) / (latency_ms / 1000.0);
 
-            analysis::RunningStatsPush(*latency_stats, latency_ms);
-            analysis::RunningStatsPush(*throughput_stats, throughput);
+            analysis::RunningStatsPush(latency_stats, latency_ms);
+            analysis::RunningStatsPush(throughput_stats, throughput);
         }
 
         // clean up the buffers we allocated
@@ -248,19 +248,19 @@ namespace benchmark {
             nlohmann::json model_throughput_std = nlohmann::json::array();
             nlohmann::json model_throughput_stderr = nlohmann::json::array();
 
+            analysis::RunningStats latency_stats;
+            analysis::RunningStats throughput_stats;
+            analysis::RunningStatsInit(latency_stats);
+            analysis::RunningStatsInit(throughput_stats);
+
             for (int batch_index = 0; batch_index < ctx.batch_size_count; batch_index++) {
                 const int batch_size = ctx.batch_sizes[batch_index];
-                analysis::RunningStats latency_stats;
-                analysis::RunningStats throughput_stats;
-                analysis::RunningStatsInit(latency_stats);
-                analysis::RunningStatsInit(throughput_stats);
-
                 logger.info("Beginning scan for model \"%s\" with batch size %d", spec.name.c_str(), batch_size);
 
                 char start_time[32];
                 utils::FormatTimestamp(start_time, sizeof(start_time));
 
-                if (!RunBatchTrials(stub.get(), spec, rand_gen, ctx.num_trials, batch_size, &latency_stats, &throughput_stats, logger)) {
+                if (!RunBatchTrials(stub.get(), spec, rand_gen, ctx.num_trials, batch_size, latency_stats, throughput_stats, logger)) {
                     return false;
                 }
 
@@ -272,6 +272,9 @@ namespace benchmark {
                 model_throughput.push_back(analysis::RunningStatsMean(throughput_stats));
                 model_throughput_std.push_back(analysis::RunningStatsStdDev(throughput_stats));
                 model_throughput_stderr.push_back(analysis::RunningStatsStdErr(throughput_stats));
+
+                analysis::RunningStatsClear(latency_stats);
+                analysis::RunningStatsClear(throughput_stats);
             }
 
             model_json["start_times"] = model_timestamps;
@@ -283,6 +286,9 @@ namespace benchmark {
             model_json["throughput_persec_std"] = model_throughput_std;
             model_json["throughput_persec_stderr"] = model_throughput_stderr;
             report_models.push_back(model_json);
+
+            analysis::RunningStatsDestroy(latency_stats);
+            analysis::RunningStatsDestroy(throughput_stats);
         }
 
         (*report)["summary"] = report_models;
