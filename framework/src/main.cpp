@@ -59,7 +59,7 @@ int main(int argc, char* argv[]) {
 
     if (settings.launch_server) {
         logger.info("Launching server binary \"%s\"", settings.server_binary_path.c_str());
-        if (!process::LaunchServer(settings.server_binary_path.c_str(), server, logger)) {
+        if (!process::LaunchServer(settings.server_binary_path.c_str(), server, settings.server_log_path.c_str(), logger)) {
             return EXIT_FAILURE;
         }
         if (!nereid::WaitForServerReady(settings.server_address.c_str(), settings.server_port, server.pid, STARTUP_TIMEOUT_SECONDS, logger)) {

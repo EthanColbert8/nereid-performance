@@ -21,6 +21,7 @@ namespace config {
         std::optional<std::string> hardware_metrics_output_path;
 
         std::optional<std::string> server_binary_path;
+        std::optional<std::string> server_log_path;
         std::optional<std::string> server_address;
         std::optional<int> server_port;
         std::optional<pid_t> server_pid;
@@ -44,6 +45,7 @@ namespace config {
         FILE* log_file;
 
         std::string server_binary_path;
+        std::string server_log_path;
         std::string server_address;
         int server_port;
         pid_t server_pid;
@@ -108,6 +110,9 @@ namespace YAML {
 
             if (node["server_binary_path"]) {
                 a.server_binary_path = node["server_binary_path"].as<std::string>();
+            }
+            if (node["server_log_path"]) {
+                a.server_log_path = node["server_log_path"].as<std::string>();
             }
             if (node["server_address"]) {
                 a.server_address = node["server_address"].as<std::string>();

@@ -9,7 +9,7 @@
 
 namespace process {
 
-    bool LaunchServer(const char* binary_path, ServerProcess& server, logging::Logger& logger) {
+    bool LaunchServer(const char* binary_path, ServerProcess& server, const char* log_path, logging::Logger& logger) {
         pid_t pid = fork();
         if (pid < 0) {
             logger.error("failed to fork server process");
@@ -17,12 +17,11 @@ namespace process {
         }
 
         if (pid == 0) {
-            // TODO (Ethan): Redirect server logs to a configurable file instead of /dev/null
-            int dev_null = open("/dev/null", O_WRONLY);
-            if (dev_null >= 0) {
-                dup2(dev_null, STDOUT_FILENO);
-                dup2(dev_null, STDERR_FILENO);
-                close(dev_null);
+            int log_file = open(log_path, O_WRONLY | O_CREAT | O_TRUNC, 0644);
+            if (log_file >= 0) {
+                dup2(log_file, STDOUT_FILENO);
+                dup2(log_file, STDERR_FILENO);
+                close(log_file);
             }
 
             execl(binary_path, binary_path, static_cast<char*>(nullptr));

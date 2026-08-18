@@ -9,7 +9,7 @@
 [x] Create a logging system
 [x] Reorganize JSON output - it's awful rn
 [x] Include timestamps of when trials started in benchmark report
-[ ] Get Nereid server logs sent to a file (currently it's `/dev/null`) when we own process
+[x] Get Nereid server logs sent to a file (currently it's `/dev/null`) when we own process
 [x] Allow logging to files other than stderr
 [x] Start thinking about benchmark configuration via YAML
 [ ] Default to running all loaded models with non-ambiguous input shapes
