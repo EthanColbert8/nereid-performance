@@ -191,7 +191,7 @@ namespace benchmark {
         config_json["server_address"] = ctx.server_address;
 
         nlohmann::json model_names_json = nlohmann::json::array();
-        for (int i = 0; i < ctx.model_count; i++) {
+        for (size_t i = 0; i < ctx.model_specs.size(); i++) {
             model_names_json.push_back(ctx.model_specs[i].name);
         }
         config_json["model_names"] = model_names_json;
@@ -211,7 +211,7 @@ namespace benchmark {
         logger.info("Server metadata recorded. Beginning scans.");
 
         nlohmann::json report_models = nlohmann::json::array();
-        for (size_t i = 0; i < ctx.model_count; i++) {
+        for (size_t i = 0; i < ctx.model_specs.size(); i++) {
             const nereid::ModelSpec& spec = ctx.model_specs[i];
 
             nlohmann::json model_json = nlohmann::json::object();
@@ -253,7 +253,7 @@ namespace benchmark {
             analysis::RunningStatsInit(latency_stats);
             analysis::RunningStatsInit(throughput_stats);
 
-            for (int batch_index = 0; batch_index < ctx.batch_size_count; batch_index++) {
+            for (size_t batch_index = 0; batch_index < ctx.batch_sizes.size(); batch_index++) {
                 const int batch_size = ctx.batch_sizes[batch_index];
                 logger.info("Beginning scan for model \"%s\" with batch size %d", spec.name.c_str(), batch_size);
 

@@ -80,7 +80,7 @@ int main(int argc, char* argv[]) {
     }
     logger.info("Server found ready at address \"%s:%d\"", settings.server_address.c_str(), settings.server_port);
 
-    if (!benchmark::BuildBenchmarkContext(settings, &ctx, logger)) {
+    if (!benchmark::BuildBenchmarkContext(settings, ctx, logger)) {
         process::StopServer(server, logger);
         return EXIT_FAILURE;
     }
