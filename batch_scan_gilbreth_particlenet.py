@@ -8,6 +8,7 @@ import tritonclient.grpc as grpcclient
 
 def main(args):
     batch_sizes = [4, 8, 16, 32, 64, 128, 256, 512, 1024, 2048]
+    # batch_sizes = [4, 8, 16, 32, 64, 128, 256, 512, 1024]
     n_trials = args.ntrials
     server_address = f"localhost:{args.port}"
     rand_gen = np.random.default_rng(args.seed)
@@ -16,6 +17,13 @@ def main(args):
     if (model_name != "particlenet_AK4_PT") and (model_name != "particlenet_AK4"):
         logging.warning(f"Model name \"{model_name}\" not recognized. Using \"particlenet_AK4_PT\" instead.")
         model_name = "particlenet_AK4_PT"
+
+    # Adjust the input/output names for Triton if needed
+    input_names = ["pf_points", "pf_features", "pf_mask", "sv_points", "sv_features", "sv_mask"]
+    output_names = ["softmax"]
+    if args.triton:
+        input_names = [f"{x}__{i}" for i, x in enumerate(input_names)]
+        output_names = [f"{x}__{i}" for i, x in enumerate(output_names)]
 
     logging.info(f"Running {n_trials} trials per batch size for model \"{model_name}\"")
 
@@ -34,14 +42,14 @@ def main(args):
 
             logging.info(f"Starting batch size {batch_size}")
 
-            inputs.append(grpcclient.InferInput("pf_points", [batch_size, 2, 100], "FP32"))
-            inputs.append(grpcclient.InferInput("pf_features", [batch_size, 20, 100], "FP32"))
-            inputs.append(grpcclient.InferInput("pf_mask", [batch_size, 1, 100], "FP32"))
-            inputs.append(grpcclient.InferInput("sv_points", [batch_size, 2, 10], "FP32"))
-            inputs.append(grpcclient.InferInput("sv_features", [batch_size, 11, 10], "FP32"))
-            inputs.append(grpcclient.InferInput("sv_mask", [batch_size, 1, 10], "FP32"))
+            inputs.append(grpcclient.InferInput(input_names[0], [batch_size, 2, 100], "FP32"))
+            inputs.append(grpcclient.InferInput(input_names[1], [batch_size, 20, 100], "FP32"))
+            inputs.append(grpcclient.InferInput(input_names[2], [batch_size, 1, 100], "FP32"))
+            inputs.append(grpcclient.InferInput(input_names[3], [batch_size, 2, 10], "FP32"))
+            inputs.append(grpcclient.InferInput(input_names[4], [batch_size, 11, 10], "FP32"))
+            inputs.append(grpcclient.InferInput(input_names[5], [batch_size, 1, 10], "FP32"))
 
-            outputs.append(grpcclient.InferRequestedOutput("softmax"))
+            outputs.append(grpcclient.InferRequestedOutput(output_names[0]))
 
             for trial in range(1, n_trials+1):
                 pf_points = rand_gen.standard_normal(size=(batch_size, 2, 100)).astype(np.float32)
@@ -99,6 +107,7 @@ if (__name__ == "__main__"):
     parser.add_argument("--model", type=str, default="particlenet_AK4_PT", help="Name of model to compute inference with")
     parser.add_argument("--ntrials", type=int, default=100, help="Number of trials to run for each batch size")
     parser.add_argument("--seed", type=int, default=None, help="Random seed for input generation")
+    parser.add_argument("--triton", action="store_true", help="Running with Triton server (adjusts input/output names)")
     parser.add_argument("--verbose", action="store_true", help="Enable debug-level logging")
     args = parser.parse_args()
 
