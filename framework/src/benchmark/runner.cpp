@@ -164,7 +164,14 @@ namespace benchmark {
     }
 
     // TODO: adjust this to work based on Runs/Stages/Sequences/Steps
-    bool BenchmarkRunner::RunSingleClient() {
+    bool BenchmarkRunner::RunSingleClient(size_t run_idx) {
+        if (run_idx >= ctx.runs.size()) {
+            logger->error("run index %zu is out of bounds for runs size %zu", run_idx, ctx.runs.size());
+            return false;
+        }
+        Run& run = ctx.runs[run_idx];
+
+        // NOTE (Ethan): is this the right place for this check? -- should use constructor probably
         if (report == nullptr) {
             logger->error("report output pointer is null");
             return false;

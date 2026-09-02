@@ -30,12 +30,9 @@ namespace benchmark {
             bool RunBatchTrials(inference::GRPCInferenceService::Stub* stub, const Step& step, analysis::RunningStats& latency_stats, analysis::RunningStats& throughput_stats);
 
         public:
-            // Constructors here
             BenchmarkRunner(logging::Logger* logger, const BenchmarkContext& ctx, nlohmann::json* report);
 
-            bool RunSingleClient();
-            
+            bool RunSingleClient(size_t run_idx);
     };
-    // bool RunSingleClientBenchmark(const BenchmarkContext& ctx, nlohmann::json* report, logging::Logger& logger);
 
 } // namespace benchmark

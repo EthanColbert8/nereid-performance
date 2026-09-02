@@ -34,6 +34,7 @@ namespace benchmark {
     };
 
     struct Run {
+        std::string name;
         std::vector<Stage> stages;
     };
 
