@@ -129,10 +129,10 @@ namespace benchmark {
             return false;
         }
 
-        if (args.batch_sizes.size() < 1) {
-            logger.error("no batch sizes were provided");
-            return false;
-        }
+        // if (args.batch_sizes.size() < 1) {
+        //     logger.error("no batch sizes were provided");
+        //     return false;
+        // }
         
         static std::string combined_server_address;
         if (!utils::BuildAddress(args.server_address.c_str(), args.server_port, &combined_server_address)) {
@@ -141,8 +141,9 @@ namespace benchmark {
         }
 
         context.server_address = combined_server_address;
-        context.num_trials = args.num_trials;
-        context.batch_sizes = args.batch_sizes;
+        // context.num_trials = args.num_trials;
+        // context.batch_sizes = args.batch_sizes;
+        context.runs = args.runs;
 
         auto channel = grpc::CreateChannel(context.server_address, grpc::InsecureChannelCredentials());
         auto stub = inference::GRPCInferenceService::NewStub(channel);
@@ -153,8 +154,8 @@ namespace benchmark {
             return false;
         }
 
-        context.model_specs.clear();
-        context.model_specs.reserve(args.model_specs.size());
+        //context.model_specs.clear();
+        context.model_directory.reserve(args.model_specs.size());
 
         for (size_t model_index = 0; model_index < args.model_specs.size(); model_index++) {
             const nereid::ModelSpec& config_spec = args.model_specs[model_index];
@@ -228,7 +229,8 @@ namespace benchmark {
                 return false;
             }
 
-            context.model_specs.push_back(std::move(merged_spec));
+            // context.model_specs.push_back(std::move(merged_spec));
+            context.model_directory[merged_spec.name] = std::move(merged_spec);
         }
 
         if (context.model_specs.empty()) {

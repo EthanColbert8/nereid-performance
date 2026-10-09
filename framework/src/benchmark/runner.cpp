@@ -79,7 +79,7 @@ namespace benchmark {
         }
         int num_trials = step.stop_value;
         int batch_size = step.batch_size;
-        nereid::ModelSpec& spec = step.model_spec;
+        nereid::ModelSpec spec = ctx.model_directory[step.model_name];
 
         inference::ModelInferRequest request;
         request.set_model_name(spec.name);

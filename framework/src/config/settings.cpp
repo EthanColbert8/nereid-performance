@@ -18,7 +18,7 @@ namespace config {
     constexpr const char* const DEFAULT_SERVER_LOG_PATH = "/dev/null";
     constexpr const char* const DEFAULT_SERVER_ADDRESS = "localhost";
     constexpr int DEFAULT_SERVER_PORT = 50051;
-    constexpr int DEFAULT_NUM_TRIALS = 100;
+    // constexpr int DEFAULT_NUM_TRIALS = 100;
 
     CliArgs ParseCliArgs(int argc, char* argv[]) {
         CliArgs args;
@@ -74,11 +74,11 @@ namespace config {
             "PID of server instance to allow for monitoring of process metrics if not launched"
         );
 
-        int num_trials;
-        auto* trials_opt = app.add_option(
-            "-n,--num-trials", num_trials,
-            "number of trials to run per benchmark step (default: " + std::to_string(DEFAULT_NUM_TRIALS) + ")"
-        );
+        // int num_trials;
+        // auto* trials_opt = app.add_option(
+        //     "-n,--num-trials", num_trials,
+        //     "number of trials to run per benchmark step (default: " + std::to_string(DEFAULT_NUM_TRIALS) + ")"
+        // );
 
         auto* launch_flag = app.add_flag("--launch-server", "launch a server process for benchmarking (we do not by default)");
         auto* verbose_flag = app.add_flag("--verbose", "enable debug-level logging");
@@ -99,7 +99,7 @@ namespace config {
         if (address_opt->count()) { args.server_address = server_address; }
         if (port_opt->count()) { args.server_port = server_port; }
         if (pid_opt->count()) { args.server_pid = server_pid; }
-        if (trials_opt->count()) { args.num_trials = num_trials; }
+        // if (trials_opt->count()) { args.num_trials = num_trials; }
         if (launch_flag->count()) { args.launch_server = true; }
         if (verbose_flag->count()) { args.verbose = true; }
 
@@ -127,7 +127,7 @@ namespace config {
         s.server_address = DEFAULT_SERVER_ADDRESS;
         s.server_port = DEFAULT_SERVER_PORT;
         s.server_pid = -1;
-        s.num_trials = DEFAULT_NUM_TRIALS;
+        // s.num_trials = DEFAULT_NUM_TRIALS;
 
         s.log_file = stderr;
         s.launch_server = false;
@@ -140,12 +140,13 @@ namespace config {
         if (config_args.cli_args.server_address) { s.server_address = config_args.cli_args.server_address.value(); }
         if (config_args.cli_args.server_port) { s.server_port = config_args.cli_args.server_port.value(); }
         // no config option for server_pid, as that is intended for scripting
-        if (config_args.cli_args.num_trials) { s.num_trials = config_args.cli_args.num_trials.value(); }
+        // if (config_args.cli_args.num_trials) { s.num_trials = config_args.cli_args.num_trials.value(); }
         if (config_args.cli_args.launch_server) { s.launch_server = config_args.cli_args.launch_server.value(); }
         if (config_args.cli_args.verbose) { s.verbose = config_args.cli_args.verbose.value(); }
 
         if (config_args.model_specs) { s.model_specs = config_args.model_specs.value(); }
-        if (config_args.batch_sizes) { s.batch_sizes = config_args.batch_sizes.value(); }
+        // if (config_args.batch_sizes) { s.batch_sizes = config_args.batch_sizes.value(); }
+        if (config_args.runs) { s.runs = config_args.runs.value(); }
 
         if (cli_args.output_path) { s.output_path = cli_args.output_path.value(); }
         if (cli_args.hardware_metrics_output_path) { s.hardware_metrics_output_path = cli_args.hardware_metrics_output_path.value(); }
@@ -154,7 +155,7 @@ namespace config {
         if (cli_args.server_address) { s.server_address = cli_args.server_address.value(); }
         if (cli_args.server_port) { s.server_port = cli_args.server_port.value(); }
         if (cli_args.server_pid) { s.server_pid = cli_args.server_pid.value(); }
-        if (cli_args.num_trials) { s.num_trials = cli_args.num_trials.value(); }
+        // if (cli_args.num_trials) { s.num_trials = cli_args.num_trials.value(); }
         if (cli_args.launch_server) { s.launch_server = cli_args.launch_server.value(); }
         if (cli_args.verbose) { s.verbose = cli_args.verbose.value(); }
 
@@ -173,9 +174,57 @@ namespace config {
             }
         }
 
-        // add some default batch sizes if there were never any configured
-        if (s.batch_sizes.empty()) {
-            s.batch_sizes.assign({4, 8, 16, 32, 64, 128});
+        // // add some default batch sizes if there were never any configured
+        // if (s.batch_sizes.empty()) {
+        //     s.batch_sizes.assign({4, 8, 16, 32, 64, 128});
+        // }
+
+        if (s.runs.empty()) {
+            s.runs.assign({
+                benchmark::Run{
+                    .name = "default",
+                    .stages = {
+                        benchmark::Stage{
+                            .client_sequences = {
+                                benchmark::Sequence{
+                                    .steps = {
+                                        benchmark::Step{
+                                            .model_name = "particlenet_AK4_PT",
+                                            .batch_size = 8,
+                                            .stop_value = 100,
+                                            .stop_condition = benchmark::StopConditionType::NUM_TRIALS
+                                        },
+                                        benchmark::Step{
+                                            .model_name = "particlenet_AK4_PT",
+                                            .batch_size = 16,
+                                            .stop_value = 100,
+                                            .stop_condition = benchmark::StopConditionType::NUM_TRIALS
+                                        },
+                                        benchmark::Step{
+                                            .model_name = "particlenet_AK4_PT",
+                                            .batch_size = 32,
+                                            .stop_value = 100,
+                                            .stop_condition = benchmark::StopConditionType::NUM_TRIALS
+                                        },
+                                        benchmark::Step{
+                                            .model_name = "particlenet_AK4_PT",
+                                            .batch_size = 64,
+                                            .stop_value = 100,
+                                            .stop_condition = benchmark::StopConditionType::NUM_TRIALS
+                                        },
+                                        benchmark::Step{
+                                            .model_name = "particlenet_AK4_PT",
+                                            .batch_size = 128,
+                                            .stop_value = 100,
+                                            .stop_condition = benchmark::StopConditionType::NUM_TRIALS
+                                        },
+                                    }
+                                }
+                            }
+                        }
+                    }
+                }
+            });
         }
     }
 
