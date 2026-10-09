@@ -163,7 +163,6 @@ namespace benchmark {
         return true;
     }
 
-    // TODO: adjust this to work based on Runs/Stages/Sequences/Steps
     bool BenchmarkRunner::RunSingleClient(size_t run_idx) {
         if (run_idx >= ctx.runs.size()) {
             logger->error("run index %zu is out of bounds for runs size %zu", run_idx, ctx.runs.size());
@@ -189,10 +188,12 @@ namespace benchmark {
             return false;
         }
 
-        // TODO (Ethan): why is json initialization here?
-        *report = nlohmann::json::object();
+        analysis::RunningStats latency_stats;
+        analysis::RunningStats throughput_stats;
+        analysis::RunningStatsInit(latency_stats);
+        analysis::RunningStatsInit(throughput_stats);
 
-        stages_json = nlohmann::json::array();
+        nlohmann::json stages_json = nlohmann::json::array();
 
         for (size_t stage_idx = 0; stage_idx < run.stages.size(); stage_idx++) {
             Stage& stage = run.stages[stage_idx];
@@ -203,145 +204,45 @@ namespace benchmark {
             }
             Sequence& sequence = stage.client_sequences[0];
 
-            analysis::RunningStats latency_stats;
-            analysis::RunningStats throughput_stats;
-            analysis::RunningStatsInit(latency_stats);
-            analysis::RunningStatsInit(throughput_stats);
-
-            steps_json = nlohmann::json::array();
-
-            char start_time[32];
-            utils::FormatTimestamp(start_time, sizeof(start_time));
+            nlohmann::json steps_json = nlohmann::json::array();
 
             for (size_t step_idx = 0; step_idx < sequence.steps.size(); step_idx++) {
                 Step& step = sequence.steps[step_idx];
 
-                step_json = nlohmann::json::object();
+                nlohmann::json step_json = nlohmann::json::object();
                 step_json["model_name"] = step.model_spec.name;
                 // step_json["model_platform"] = step.model_spec.platform;
                 step_json["batch_size"] = step.batch_size;
                 step_json["num_trials"] = step.stop_value; // TODO (Ethan): interpret the stop condition type correctly
 
+                char start_time[32];
+                utils::FormatTimestamp(start_time, sizeof(start_time));
+
                 if (!RunBatchTrials(stub.get(), step, latency_stats, throughput_stats)) {
                     return false;
                 }
 
-
-
+                step_json["start_time"] = std::string(start_time);
+                step_json["latency_ms"] = analysis::RunningStatsMean(latency_stats);
+                step_json["latency_ms_std"] = analysis::RunningStatsStdDev(latency_stats);
+                step_json["latency_ms_stderr"] = analysis::RunningStatsStdErr(latency_stats);
+                step_json["throughput_persec"] = analysis::RunningStatsMean(throughput_stats);
+                step_json["throughput_persec_std"] = analysis::RunningStatsStdDev(throughput_stats);
+                step_json["throughput_persec_stderr"] = analysis::RunningStatsStdErr(throughput_stats);
+                steps_json.push_back(step_json);
 
                 analysis::RunningStatsClear(latency_stats);
                 analysis::RunningStatsClear(throughput_stats);
             }
 
+            stages_json.push_back(steps_json);
         }
 
-        // nlohmann::json config_json = nlohmann::json::object();
-        // config_json["num_trials"] = ctx.num_trials;
-        // config_json["server_address"] = ctx.server_address;
+        analysis::RunningStatsDestroy(latency_stats);
+        analysis::RunningStatsDestroy(throughput_stats);
 
-        // nlohmann::json model_names_json = nlohmann::json::array();
-        // for (size_t i = 0; i < ctx.model_specs.size(); i++) {
-        //     model_names_json.push_back(ctx.model_specs[i].name);
-        // }
-        // config_json["model_names"] = model_names_json;
-
-        // nlohmann::json server_json = nlohmann::json::object();
-        // server_json["name"] = server_metadata_response.name();
-        // server_json["version"] = server_metadata_response.version();
-        // nlohmann::json extensions_json = nlohmann::json::array();
-        // for (int i = 0; i < server_metadata_response.extensions_size(); i++) {
-        //     extensions_json.push_back(server_metadata_response.extensions(i));
-        // }
-        // server_json["extensions"] = extensions_json;
-
-        // (*report)["config"] = config_json;
-        // (*report)["server"] = server_json;
-
-        // logger->info("Server metadata recorded. Beginning scans.");
-
-        // nlohmann::json report_models = nlohmann::json::array();
-        // for (size_t i = 0; i < ctx.model_specs.size(); i++) {
-        //     const nereid::ModelSpec& spec = ctx.model_specs[i];
-
-        //     nlohmann::json model_json = nlohmann::json::object();
-        //     model_json["name"] = spec.name;
-        //     model_json["version"] = spec.version;
-        //     model_json["platform"] = spec.platform;
-
-        //     nlohmann::json inputs_json = nlohmann::json::array();
-        //     for (size_t j = 0; j < spec.inputs.size(); j++) {
-        //         nlohmann::json tensor_json = nlohmann::json::object();
-        //         tensor_json["name"] = spec.inputs[j].name;
-        //         tensor_json["datatype"] = nereid::DtypeToString(spec.inputs[j].dtype);
-        //         tensor_json["shape"] = spec.inputs[j].shape;
-        //         inputs_json.push_back(tensor_json);
-        //     }
-        //     model_json["inputs"] = inputs_json;
-
-        //     nlohmann::json outputs_json = nlohmann::json::array();
-        //     for (size_t j = 0; j < spec.outputs.size(); j++) {
-        //         nlohmann::json tensor_json = nlohmann::json::object();
-        //         tensor_json["name"] = spec.outputs[j].name;
-        //         tensor_json["datatype"] = nereid::DtypeToString(spec.outputs[j].dtype);
-        //         tensor_json["shape"] = spec.outputs[j].shape;
-        //         outputs_json.push_back(tensor_json);
-        //     }
-        //     model_json["outputs"] = outputs_json;
-
-        //     nlohmann::json model_timestamps = nlohmann::json::array();
-        //     nlohmann::json model_batch_sizes = nlohmann::json::array();
-        //     nlohmann::json model_latency = nlohmann::json::array();
-        //     nlohmann::json model_latency_std = nlohmann::json::array();
-        //     nlohmann::json model_latency_stderr = nlohmann::json::array();
-        //     nlohmann::json model_throughput = nlohmann::json::array();
-        //     nlohmann::json model_throughput_std = nlohmann::json::array();
-        //     nlohmann::json model_throughput_stderr = nlohmann::json::array();
-
-        //     analysis::RunningStats latency_stats;
-        //     analysis::RunningStats throughput_stats;
-        //     analysis::RunningStatsInit(latency_stats);
-        //     analysis::RunningStatsInit(throughput_stats);
-
-        //     for (size_t batch_index = 0; batch_index < ctx.batch_sizes.size(); batch_index++) {
-        //         const int batch_size = ctx.batch_sizes[batch_index];
-        //         logger->info("Beginning scan for model \"%s\" with batch size %d", spec.name.c_str(), batch_size);
-
-        //         char start_time[32];
-        //         utils::FormatTimestamp(start_time, sizeof(start_time));
-
-        //         if (!RunBatchTrials(stub.get(), spec, rand_gen, ctx.num_trials, batch_size, latency_stats, throughput_stats)) {
-        //             return false;
-        //         }
-
-        //         model_timestamps.push_back(std::string(start_time));
-        //         model_batch_sizes.push_back(batch_size);
-        //         model_latency.push_back(analysis::RunningStatsMean(latency_stats));
-        //         model_latency_std.push_back(analysis::RunningStatsStdDev(latency_stats));
-        //         model_latency_stderr.push_back(analysis::RunningStatsStdErr(latency_stats));
-        //         model_throughput.push_back(analysis::RunningStatsMean(throughput_stats));
-        //         model_throughput_std.push_back(analysis::RunningStatsStdDev(throughput_stats));
-        //         model_throughput_stderr.push_back(analysis::RunningStatsStdErr(throughput_stats));
-
-        //         analysis::RunningStatsClear(latency_stats);
-        //         analysis::RunningStatsClear(throughput_stats);
-        //     }
-
-        //     model_json["start_times"] = model_timestamps;
-        //     model_json["batch_sizes"] = model_batch_sizes;
-        //     model_json["latency_ms"] = model_latency;
-        //     model_json["latency_ms_std"] = model_latency_std;
-        //     model_json["latency_ms_stderr"] = model_latency_stderr;
-        //     model_json["throughput_persec"] = model_throughput;
-        //     model_json["throughput_persec_std"] = model_throughput_std;
-        //     model_json["throughput_persec_stderr"] = model_throughput_stderr;
-        //     report_models.push_back(model_json);
-
-        //     analysis::RunningStatsDestroy(latency_stats);
-        //     analysis::RunningStatsDestroy(throughput_stats);
-        // }
-
-        // (*report)["summary"] = report_models;
-        // return true;
+        (*report)[run.name] = stages_json;
+        return true;
     }
 
 } // namespace benchmark

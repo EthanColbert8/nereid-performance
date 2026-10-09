@@ -43,7 +43,7 @@ int main(int argc, char* argv[]) {
     logging::Logger logger(settings.log_file, settings.verbose ? logging::LogLevel::DEBUG : logging::LogLevel::INFO, LOG_BUFFER_SIZE_BYTES);
 
     benchmark::BenchmarkContext ctx;
-    nlohmann::json report;
+    nlohmann::json report = nlohmann::json::object();
 
     // All the stuff needed for hardware metrics collection
     process::HardwareMetricsContext hardware_metrics_context;
