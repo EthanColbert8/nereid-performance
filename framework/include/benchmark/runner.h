@@ -2,6 +2,7 @@
 
 #include "benchmark/context.h"
 #include "logging/logger.h"
+#include "analysis/stats.h"
 
 #include <string>
 #include <random>

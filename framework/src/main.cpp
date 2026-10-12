@@ -101,8 +101,10 @@ int main(int argc, char* argv[]) {
         hardware_metrics_running = true;
     }
 
+    benchmark::BenchmarkRunner runner(&logger, ctx, &report);
+
     logger.info("Beginning benchmark");
-    if (!benchmark::RunSingleClientBenchmark(ctx, &report, logger)) {
+    if (!runner.RunSingleClient(0)) {
         process::StopServer(server, logger);
         return EXIT_FAILURE;
     }

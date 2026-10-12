@@ -233,7 +233,7 @@ namespace benchmark {
             context.model_directory[merged_spec.name] = std::move(merged_spec);
         }
 
-        if (context.model_specs.empty()) {
+        if (context.model_directory.empty()) {
             logger.error("no desired models were found on the server");
             return false;
         }

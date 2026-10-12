@@ -1,7 +1,7 @@
 #pragma once
 
 #include "nereid/model.h"
-#include "benchmark/context.h"
+#include "benchmark/desc.h"
 
 #include <cstdio>
 #include <cstdint>

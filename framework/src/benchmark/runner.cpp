@@ -210,8 +210,8 @@ namespace benchmark {
                 Step& step = sequence.steps[step_idx];
 
                 nlohmann::json step_json = nlohmann::json::object();
-                step_json["model_name"] = step.model_spec.name;
-                // step_json["model_platform"] = step.model_spec.platform;
+                step_json["model_name"] = step.model_name;
+                // step_json["model_platform"] = step.model_spec.platform; // incorrect, need to grab from map
                 step_json["batch_size"] = step.batch_size;
                 step_json["num_trials"] = step.stop_value; // TODO (Ethan): interpret the stop condition type correctly
 
