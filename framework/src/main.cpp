@@ -43,7 +43,7 @@ int main(int argc, char* argv[]) {
     logging::Logger logger(settings.log_file, settings.verbose ? logging::LogLevel::DEBUG : logging::LogLevel::INFO, LOG_BUFFER_SIZE_BYTES);
 
     benchmark::BenchmarkContext ctx;
-    nlohmann::json report;
+    nlohmann::json report = nlohmann::json::object();
 
     // All the stuff needed for hardware metrics collection
     process::HardwareMetricsContext hardware_metrics_context;
@@ -59,7 +59,7 @@ int main(int argc, char* argv[]) {
 
     if (settings.launch_server) {
         logger.info("Launching server binary \"%s\"", settings.server_binary_path.c_str());
-        if (!process::LaunchServer(settings.server_binary_path.c_str(), server, logger)) {
+        if (!process::LaunchServer(settings.server_binary_path.c_str(), server, settings.server_log_path.c_str(), logger)) {
             return EXIT_FAILURE;
         }
         if (!nereid::WaitForServerReady(settings.server_address.c_str(), settings.server_port, server.pid, STARTUP_TIMEOUT_SECONDS, logger)) {
@@ -80,7 +80,7 @@ int main(int argc, char* argv[]) {
     }
     logger.info("Server found ready at address \"%s:%d\"", settings.server_address.c_str(), settings.server_port);
 
-    if (!benchmark::BuildBenchmarkContext(settings, &ctx, logger)) {
+    if (!benchmark::BuildBenchmarkContext(settings, ctx, logger)) {
         process::StopServer(server, logger);
         return EXIT_FAILURE;
     }
@@ -101,8 +101,10 @@ int main(int argc, char* argv[]) {
         hardware_metrics_running = true;
     }
 
+    benchmark::BenchmarkRunner runner(&logger, ctx, &report);
+
     logger.info("Beginning benchmark");
-    if (!benchmark::RunSingleClientBenchmark(ctx, &report, logger)) {
+    if (!runner.RunSingleClient(0)) {
         process::StopServer(server, logger);
         return EXIT_FAILURE;
     }

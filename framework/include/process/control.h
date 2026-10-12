@@ -13,7 +13,7 @@ namespace process {
         bool running;
     };
 
-    bool LaunchServer(const char* binary_path, ServerProcess& server, logging::Logger& logger);
+    bool LaunchServer(const char* binary_path, ServerProcess& server, const char* log_path, logging::Logger& logger);
     void StopServer(ServerProcess& server, logging::Logger& logger);
 
 } // namespace process

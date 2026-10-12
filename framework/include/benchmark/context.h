@@ -1,24 +1,24 @@
 #pragma once
 
+#include "benchmark/desc.h"
 #include "config/settings.h"
 #include "logging/logger.h"
 #include "nereid/model.h"
 
 #include <string>
-#include <sys/types.h>
+#include <vector>
+#include <unordered_map>
 
 namespace benchmark {
 
-    // TODO (Ethan): change this guy to just use vectors, it's too much work to try to translate all the time
     struct BenchmarkContext {
-        const char* server_address; // already put together with port
-        const nereid::ModelSpec* model_specs;
-        int model_count;
-        const int* batch_sizes;
-        int batch_size_count;
-        int num_trials;
+        // int num_trials;
+        std::string server_address; // already put together with port
+        std::unordered_map<std::string, nereid::ModelSpec> model_directory; // maps name->spec
+        // std::vector<int> batch_sizes;
+        std::vector<Run> runs;
     };
 
-    bool BuildBenchmarkContext(const config::Settings& args, BenchmarkContext* context, logging::Logger& logger);
+    bool BuildBenchmarkContext(const config::Settings& args, BenchmarkContext& context, logging::Logger& logger);
 
 } // namespace benchmark

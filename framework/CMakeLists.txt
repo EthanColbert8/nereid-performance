@@ -16,6 +16,7 @@ include(FetchContent)
 include(FetchGrpc)
 include(FetchJson)
 include(FetchYaml)
+include(FetchHdrHist)
 
 # --- proto codegen ---
 set(PROTO_PATH "${CMAKE_CURRENT_SOURCE_DIR}/proto")
@@ -62,4 +63,5 @@ target_link_libraries(nereid-bench PRIVATE
   grpc_service_proto
   yaml-cpp
   nlohmann_json::nlohmann_json
+  hdr_histogram_static
 )

@@ -123,38 +123,30 @@ namespace benchmark {
         return true;
     }
 
-    bool BuildBenchmarkContext(const config::Settings& args, BenchmarkContext* context, logging::Logger& logger) {
-        if (context == nullptr) {
-            logger.error("benchmark context pointer is null");
+    bool BuildBenchmarkContext(const config::Settings& args, BenchmarkContext& context, logging::Logger& logger) {
+        if (args.model_specs.size() < 1) {
+            logger.error("no benchmark models were provided");
             return false;
         }
 
+        // if (args.batch_sizes.size() < 1) {
+        //     logger.error("no batch sizes were provided");
+        //     return false;
+        // }
+        
         static std::string combined_server_address;
         if (!utils::BuildAddress(args.server_address.c_str(), args.server_port, &combined_server_address)) {
             logger.error("invalid server address and/or port: %s:%d", args.server_address.c_str(), args.server_port);
             return false;
         }
 
-        if (args.model_specs.size() < 1) {
-            logger.error("no benchmark models were provided");
-            return false;
-        }
+        context.server_address = combined_server_address;
+        // context.num_trials = args.num_trials;
+        // context.batch_sizes = args.batch_sizes;
+        context.runs = args.runs;
 
-        if (args.batch_sizes.size() < 1) {
-            logger.error("no batch sizes were provided");
-            return false;
-        }
-
-        context->server_address = combined_server_address.c_str();
-        context->batch_sizes = args.batch_sizes.data();
-        context->batch_size_count = args.batch_sizes.size();
-        context->num_trials = args.num_trials;
-
-        auto channel = grpc::CreateChannel(context->server_address, grpc::InsecureChannelCredentials());
+        auto channel = grpc::CreateChannel(context.server_address, grpc::InsecureChannelCredentials());
         auto stub = inference::GRPCInferenceService::NewStub(channel);
-
-        static std::vector<nereid::ModelSpec> merged_model_specs;
-        merged_model_specs.clear();
 
         // TODO (Ethan): discover models on server if not configured
         if (args.model_specs.size() < 1) {
@@ -162,7 +154,8 @@ namespace benchmark {
             return false;
         }
 
-        merged_model_specs.reserve(args.model_specs.size());
+        //context.model_specs.clear();
+        context.model_directory.reserve(args.model_specs.size());
 
         for (size_t model_index = 0; model_index < args.model_specs.size(); model_index++) {
             const nereid::ModelSpec& config_spec = args.model_specs[model_index];
@@ -236,19 +229,16 @@ namespace benchmark {
                 return false;
             }
 
-            merged_model_specs.push_back(std::move(merged_spec));
+            // context.model_specs.push_back(std::move(merged_spec));
+            context.model_directory[merged_spec.name] = std::move(merged_spec);
         }
 
-        if (merged_model_specs.empty()) {
+        if (context.model_directory.empty()) {
             logger.error("no desired models were found on the server");
             return false;
         }
-
-        context->model_specs = merged_model_specs.data();
-        context->model_count = static_cast<int>(merged_model_specs.size());
 
         return true;
     }
 
 } // namespace benchmark
-
