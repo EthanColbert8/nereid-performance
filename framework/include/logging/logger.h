@@ -1,6 +1,8 @@
 #pragma once
 
+#include <cstdarg>
 #include <cstdio>
+#include <mutex>
 #include <vector>
 
 namespace logging {
@@ -20,6 +22,9 @@ namespace logging {
             std::vector<char> buffer;
             size_t pos = 0;
             FILE* out;
+            std::mutex mtx; // guards buffer/pos so threads can share a logger
+
+            void flush_locked();
 
             void write(const char* data, size_t len);
             void write_log(LogLevel level, const char* format, va_list args);

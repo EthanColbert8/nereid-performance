@@ -4,6 +4,7 @@
 #include <cstdio>
 #include <cstring>
 #include <cstdarg>
+#include <mutex>
 #include <vector>
 
 namespace logging {
@@ -29,6 +30,11 @@ namespace logging {
     }
 
     void Logger::flush() {
+        std::lock_guard lock(mtx);
+        flush_locked();
+    }
+
+    void Logger::flush_locked() {
         if (pos > 0) {
             fwrite(buffer.data(), 1, pos, out);
             pos = 0;
@@ -37,11 +43,11 @@ namespace logging {
 
     void Logger::write(const char* data, size_t len) {
         if (len > buffer.size()) {
-            flush();
+            flush_locked();
             fwrite(data, 1, len, out);
             return;
         }
-        if (len > buffer.size() - pos) { flush(); }
+        if (len > buffer.size() - pos) { flush_locked(); }
 
         std::memcpy(buffer.data() + pos, data, len);
         pos += len;
@@ -65,6 +71,7 @@ namespace logging {
 
         if (pos >= sizeof(line)) { pos = sizeof(line) - 1; }
 
+        std::lock_guard lock(mtx);
         write(line, pos);
         write("\n", 1);
     }
