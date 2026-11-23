@@ -103,7 +103,7 @@ namespace YAML {
         static bool decode(const Node& node, benchmark::Step& s) {
             s.model_name = node["model_name"].as<std::string>();
             s.batch_size = node["batch_size"].as<int>();
-            s.stop_value = node["num_trials"].as<int>();
+            s.stop_value = node["stop_value"].as<int>();
             s.stop_condition = benchmark::StringToStopConditionType_throws(node["stop_condition"].as<std::string>());
             return true;
         }
