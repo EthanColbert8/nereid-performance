@@ -4,6 +4,9 @@
 #include <cerrno>
 #include <cstdio>
 #include <cstdint>
+#include <cstdlib>
+#include <cstring>
+#include <exception>
 #include <sys/types.h>
 #include <vector>
 #include <string>
@@ -106,9 +109,19 @@ namespace config {
         return args;
     }
 
+    // Exits with an error message if the file can't be read or parsed. The logger doesn't exist yet
+    // (its settings come from this file), so errors go straight to stderr.
     ConfigArgs LoadConfigArgs(const std::string& config_path) {
-        YAML::Node cfg = YAML::LoadFile(config_path);
-        return cfg.as<ConfigArgs>();
+        try {
+            YAML::Node cfg = YAML::LoadFile(config_path);
+            return cfg.as<ConfigArgs>();
+        }
+        // YAML::Exception derives from std::runtime_error, which our own decoders also throw
+        // (e.g. an unknown dtype or stop condition), so this covers both
+        catch (const std::exception& e) {
+            std::fprintf(stderr, "Failed to load config file '%s': %s\n", config_path.c_str(), e.what());
+            std::exit(EXIT_FAILURE);
+        }
     }
 
     void LoadProgramSettings(Settings& s, int argc, char* argv[]) {

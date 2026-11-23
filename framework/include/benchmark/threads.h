@@ -4,15 +4,18 @@
 #include "benchmark/desc.h"
 #include "analysis/stats.h"
 #include "logging/logger.h"
+// #include "benchmark/signals.h" // Channel, ClientSignal, ClientReport: kept for the SIGNAL stop condition later
 
 #include <atomic>
 #include <chrono>
 #include <condition_variable>
 #include <cstddef>
-#include <deque>
+#include <cstdint>
 #include <mutex>
 #include <random>
+#include <string>
 #include <thread>
+#include <vector>
 
 #include <grpcpp/grpcpp.h>
 #include "grpc_service.grpc.pb.h"
@@ -20,148 +23,98 @@
 
 namespace benchmark {
 
-    // Bounded multi-producer/multi-consumer queue. send() blocks while full, receive()
-    // blocks while empty. After close(), sends fail and receives drain what's left.
-    template <typename T>
-    class Channel {
+    // One-shot gate that lets every client in a stage start sending requests at the same moment.
+    // Opens once `expected` threads have arrived, or when Release() is called (e.g. a thread failed
+    // to start and will never arrive). Once open it stays open.
+    class StartGate {
         private:
             std::mutex mtx;
-            std::condition_variable not_empty;
-            std::condition_variable not_full;
-            std::deque<T> queue;
-            std::size_t capacity;
-            bool closed;
-
-            bool full() const { return queue.size() >= capacity; }
-
-            // mtx must be held
-            bool pop(T& item) {
-                if (queue.empty()) { return false; }
-
-                item = std::move(queue.front());
-                queue.pop_front();
-
-                not_full.notify_one();
-                return true;
-            }
+            std::condition_variable cv;
+            size_t expected;
+            size_t arrived;
+            bool open;
 
         public:
-            explicit Channel(std::size_t capacity) : capacity(capacity > 0 ? capacity : 1), closed(false) {}
-            Channel(const Channel&) = delete;
-            Channel& operator=(const Channel&) = delete;
+            explicit StartGate(size_t expected);
+            StartGate(const StartGate&) = delete;
+            StartGate& operator=(const StartGate&) = delete;
 
-            void close() {
-                {
-                    std::lock_guard lock(mtx);
-                    closed = true;
-                }
-
-                not_empty.notify_all();
-                not_full.notify_all();
-            }
-
-            bool is_closed() {
-                std::lock_guard lock(mtx);
-                return closed;
-            }
-
-            bool send(T value) {
-                std::unique_lock lock(mtx);
-
-                not_full.wait(lock, [&] { return !full() || closed; });
-                if (closed) { return false; }
-
-                queue.push_back(std::move(value));
-                lock.unlock();
-
-                not_empty.notify_one();
-                return true;
-            }
-
-            // Returns false only once the channel is closed and drained.
-            bool receive(T& item) {
-                std::unique_lock lock(mtx);
-
-                not_empty.wait(lock, [&] { return !queue.empty() || closed; });
-                return pop(item);
-            }
-
-            // Returns false if nothing is queued (whether or not the channel is closed).
-            bool try_receive(T& item) {
-                std::lock_guard lock(mtx);
-                return pop(item);
-            }
+            void ArriveAndWait();
+            void Release();
     };
 
-    enum class ClientSignal {
-        STOP,   // end the current step and the rest of the sequence
-        NEXT,   // end the current step and move on to the next one
-        REPORT, // send the latency histogram collected since the last report
-    };
-
-    enum class ReportReason {
-        INTERVAL,  // periodic report (report_interval elapsed)
-        REQUESTED, // response to ClientSignal::REPORT
-        STEP_END,  // the step ended; holds everything since the last report
-        FINISHED,  // the client is exiting normally; no histogram
-        FAILED,    // the client is exiting on an error; no histogram
-    };
-
-    // A latency histogram (microseconds) covering requests completed in
-    // [interval_start, interval_end]. Owns its histogram, which is null for FINISHED/FAILED.
-    // Throughput can be computed as total_count * batch_size / (interval_end - interval_start).
-    struct ClientReport {
-        size_t client_id = 0;
+    // Results of one completed step for one client. Owns its latency histogram (microseconds).
+    // Throughput can be computed as num_requests * batch_size / (end - start).
+    struct StepResult {
         size_t step_idx = 0;
-        ReportReason reason = ReportReason::INTERVAL;
-        std::chrono::steady_clock::time_point interval_start;
-        std::chrono::steady_clock::time_point interval_end;
+        std::string start_timestamp; // wall clock, same format as the logs
+        std::chrono::steady_clock::time_point start; // just before the first request
+        std::chrono::steady_clock::time_point end;   // when the last response was received
+        int64_t num_requests = 0;
         analysis::RunningStats latency_us = {nullptr};
 
-        ClientReport() = default;
-        ~ClientReport();
-        ClientReport(ClientReport&& other) noexcept;
-        ClientReport& operator=(ClientReport&& other) noexcept;
-        ClientReport(const ClientReport&) = delete;
-        ClientReport& operator=(const ClientReport&) = delete;
+        StepResult() = default;
+        ~StepResult();
+        StepResult(StepResult&& other) noexcept;
+        StepResult& operator=(StepResult&& other) noexcept;
+        StepResult(const StepResult&) = delete;
+        StepResult& operator=(const StepResult&) = delete;
     };
 
     // Runs one client's request sequence on its own thread with its own connection to the server.
-    // The channels are owned by the caller and must outlive the thread; the report channel may be
-    // shared between threads (reports carry client_id). A closed signal channel is treated as STOP.
-    // The caller must keep draining the report channel, or the thread will block when it fills up.
+    //
+    // The thread connects, waits at the start gate, then runs each step and records a StepResult.
+    // The gate and abort flag are owned by the caller, shared by all clients in the stage, and must
+    // outlive the thread. If this client fails it sets the abort flag; if it sees the abort flag set
+    // it stops early without recording the step in progress.
+    //
+    // Results() and StoppedEarly() may only be read after Join() returns (join provides the
+    // synchronization). If Start() fails, the caller must set the abort flag and Release() the gate,
+    // or the other clients will wait at the gate forever.
     class BenchmarkThread {
         private:
             size_t client_id;
             const BenchmarkContext* ctx;
             const Sequence* sequence;
-            Channel<ClientSignal>* signals;
-            Channel<ClientReport>* reports;
+            StartGate* gate;
+            std::atomic<bool>* abort;
             logging::Logger* logger;
-            std::chrono::milliseconds report_interval; // zero disables periodic reports
+
+            // NOTE (Ethan): signalling machinery, unused until the SIGNAL stop condition is implemented
+            // Channel<ClientSignal>* signals;
+            // Channel<ClientReport>* reports;
+            // std::chrono::milliseconds report_interval; // zero disables periodic reports
+            // analysis::RunningStats latency_stats; // histogram for the current report interval
+            // std::chrono::steady_clock::time_point interval_start;
+            // bool stop_requested;
 
             std::thread thread;
             std::mt19937 rng;
-            analysis::RunningStats latency_stats;
-            std::chrono::steady_clock::time_point interval_start;
+            std::vector<StepResult> results;
             std::atomic<bool> failed;
-            bool stop_requested;
+            bool stopped_early; // stopped because another client failed (written by the thread only)
 
             void Run();
             bool RunSequence();
-            bool PollSignals(size_t step_idx, std::chrono::steady_clock::time_point now, bool& keep_going);
-            bool SendReport(size_t step_idx, ReportReason reason, std::chrono::steady_clock::time_point now);
-            void SendFinal(size_t step_idx, ReportReason reason);
+            bool StopIfAborted(const char* when);
+
+            // NOTE (Ethan): signalling machinery, unused until the SIGNAL stop condition is implemented
+            // bool PollSignals(size_t step_idx, std::chrono::steady_clock::time_point now, bool& keep_going);
+            // bool SendReport(size_t step_idx, ReportReason reason, std::chrono::steady_clock::time_point now);
+            // void SendFinal(size_t step_idx, ReportReason reason);
 
         public:
             BenchmarkThread(
                 size_t client_id,
                 const BenchmarkContext* ctx,
                 const Sequence* sequence,
-                Channel<ClientSignal>* signals,
-                Channel<ClientReport>* reports,
-                logging::Logger* logger,
-                std::chrono::milliseconds report_interval = std::chrono::milliseconds(0)
+                StartGate* gate,
+                std::atomic<bool>* abort,
+                logging::Logger* logger
+                // NOTE (Ethan): signalling machinery, unused until the SIGNAL stop condition is implemented
+                // Channel<ClientSignal>* signals,
+                // Channel<ClientReport>* reports,
+                // std::chrono::milliseconds report_interval = std::chrono::milliseconds(0)
             );
             ~BenchmarkThread(); // joins the thread if it is still running
 
@@ -172,6 +125,10 @@ namespace benchmark {
             void Join();
             bool Failed() const { return failed.load(); }
             size_t ClientId() const { return client_id; }
+
+            // Only valid after Join()
+            bool StoppedEarly() const { return stopped_early; }
+            const std::vector<StepResult>& Results() const { return results; }
     };
 
 } // namespace benchmark

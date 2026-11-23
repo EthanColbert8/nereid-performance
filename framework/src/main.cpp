@@ -5,6 +5,7 @@
 #include "nereid/service.h"
 #include "benchmark/context.h"
 #include "benchmark/runner.h"
+#include "benchmark/validate.h"
 
 #include <atomic>
 #include <thread>
@@ -41,6 +42,12 @@ int main(int argc, char* argv[]) {
     config::LoadProgramSettings(settings, argc, argv);
 
     logging::Logger logger(settings.log_file, settings.verbose ? logging::LogLevel::DEBUG : logging::LogLevel::INFO, LOG_BUFFER_SIZE_BYTES);
+
+    // Catch config problems before launching or waiting for a server
+    if (!benchmark::ValidateRunDefinitions(settings.runs, logger)) {
+        logger.error("invalid benchmark run configuration, exiting");
+        return EXIT_FAILURE;
+    }
 
     benchmark::BenchmarkContext ctx;
     nlohmann::json report = nlohmann::json::object();
@@ -81,6 +88,11 @@ int main(int argc, char* argv[]) {
     logger.info("Server found ready at address \"%s:%d\"", settings.server_address.c_str(), settings.server_port);
 
     if (!benchmark::BuildBenchmarkContext(settings, ctx, logger)) {
+        process::StopServer(server, logger);
+        return EXIT_FAILURE;
+    }
+
+    if (!benchmark::ValidateRunModels(ctx, logger)) {
         process::StopServer(server, logger);
         return EXIT_FAILURE;
     }

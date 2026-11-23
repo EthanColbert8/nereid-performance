@@ -57,15 +57,25 @@ namespace benchmark {
         const Step& step,
         std::mt19937& rng,
         analysis::RunningStats& latency_stats,
+        RequestLoopSummary& summary,
         logging::Logger* logger,
         const RequestLoopHook& hook
     ) {
-        if (step.stop_value <= 0 && step.stop_condition != StopConditionType::SIGNAL) {
-            logger->error("invalid stop value %d for model \"%s\"", step.stop_value, spec.name.c_str());
+        summary = RequestLoopSummary{};
+
+        // Config validation should already have caught this; guard here too
+        if (step.stop_condition == StopConditionType::SIGNAL) {
+            logger->error("SIGNAL stop condition is not yet implemented (model \"%s\")", spec.name.c_str());
             return false;
         }
-        if (step.stop_condition == StopConditionType::SIGNAL && !hook) {
-            logger->error("SIGNAL stop condition requires a hook to end the request loop");
+        // NOTE (Ethan): restore this check (and drop the one above) once SIGNAL is implemented
+        // if (step.stop_condition == StopConditionType::SIGNAL && !hook) {
+        //     logger->error("SIGNAL stop condition requires a hook to end the request loop");
+        //     return false;
+        // }
+
+        if (step.stop_value <= 0 && step.stop_condition != StopConditionType::SIGNAL) {
+            logger->error("invalid stop value %d for model \"%s\"", step.stop_value, spec.name.c_str());
             return false;
         }
 
@@ -109,6 +119,9 @@ namespace benchmark {
         const auto loop_start = std::chrono::steady_clock::now();
         const auto deadline = loop_start + std::chrono::seconds(step.stop_value);
 
+        summary.start = loop_start;
+        summary.end = loop_start;
+
         // the tight loop around running inference trials
         for (int64_t trial = 0; ; trial++) {
             if (step.stop_condition == StopConditionType::NUM_TRIALS && trial >= step.stop_value) { break; }
@@ -145,6 +158,8 @@ namespace benchmark {
 
             const int64_t latency_us = std::chrono::duration_cast<std::chrono::microseconds>(end_time - start_time).count();
             analysis::RunningStatsPush(latency_stats, latency_us);
+            summary.end = end_time;
+            summary.num_requests++;
 
             if (hook && !hook(end_time)) { break; }
             if (step.stop_condition == StopConditionType::TIME && end_time >= deadline) { break; }
